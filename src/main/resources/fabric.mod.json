@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "hitx",
+  "version": "${version}",
+  "name": "HitX",
+  "icon": {
+    "128": "icon.png"
+  },
+  "description": "HitX, Minecraft PvP için geliştirilmiş modern bir Smart Hit Marker modudur. Oyuncuya başarılı bir şekilde vurduğunuzda ekranın ortasında dinamik bir 'X' animasyonu gösterir. Kritik vuruşları daha belirgin hale getirir ve PvP deneyiminizi daha akıcı ve profesyonel hissettirir. Hafif ve performans dostudur, çok oyunculu PvP modları için optimize edilmiştir.",
+  "authors": ["Yukile"],
+  "license": "Apache-2.0",
+  "environment": "client",
+
+  "entrypoints": {
+    "client": [
+      "com.exloran.totemquick.Main"
+    ],
+    "modmenu": [
+      "com.exloran.totemquick.ModMenu"
+    ]
+  },
+
+  "mixins": [
+    "totemquick.mixins.json"
+  ],
+
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "minecraft": "1.21.x",
+    "fabric-api": "*",
+    "cloth-config2": "*",
+    "modmenu": "*",
+    "java": ">=17"
+  }
+}
