@@ -4,7 +4,9 @@ plugins {
 }
 
 version = "1.0.0"
-group = "com.yukile394.totemquick"
+group = "com.yukile394.hitx"
+
+archivesBaseName = "hitx"
 
 repositories {
     maven { url "https://maven.fabricmc.net/" }
