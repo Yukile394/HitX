@@ -7,21 +7,18 @@ import me.shedaniel.autoconfig.annotation.ConfigEntry;
 @Config(name = "hitx")
 public class HitXConfig implements ConfigData {
 
-    @ConfigEntry.Gui.Tooltip
     public boolean enabled = true;
-
-    @ConfigEntry.Gui.Tooltip
     public boolean sound = true;
+    public boolean comboCounter = true;
+    public boolean criticalEffect = true;
+    public boolean killEffect = true;
 
-    @ConfigEntry.Gui.Tooltip
-    @ConfigEntry.BoundedDiscrete(min = 2, max = 20)
-    public int size = 6;
+    @ConfigEntry.BoundedDiscrete(min = 4, max = 30)
+    public int size = 10;
 
-    @ConfigEntry.Gui.Tooltip
-    @ConfigEntry.BoundedDiscrete(min = 1, max = 20)
-    public int duration = 8;
+    @ConfigEntry.BoundedDiscrete(min = 5, max = 20)
+    public int duration = 10;
 
-    @ConfigEntry.Gui.EnumHandler(option = ConfigEntry.Gui.EnumHandler.EnumDisplayOption.BUTTON)
     public ColorMode color = ColorMode.YELLOW;
 
     public enum ColorMode {
