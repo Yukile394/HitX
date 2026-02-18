@@ -2,8 +2,10 @@
   "required": true,
   "package": "com.exloran.hitx.mixin",
   "compatibilityLevel": "JAVA_21",
-  "mixins": [],
-  "client": [],
+  "client": [
+  ],
+  "mixins": [
+  ],
   "injectors": {
     "defaultRequire": 1
   }
