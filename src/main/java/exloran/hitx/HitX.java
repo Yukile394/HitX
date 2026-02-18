@@ -1,6 +1,5 @@
 package com.exloran.hitx;
 
-import com.exloran.hitx.config.HitXConfig;
 import me.shedaniel.autoconfig.AutoConfig;
 import me.shedaniel.autoconfig.serializer.GsonConfigSerializer;
 import net.fabricmc.api.ClientModInitializer;
@@ -9,23 +8,12 @@ import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.entity.LivingEntity;
-import net.minecraft.sound.SoundEvents;
-import net.minecraft.text.Text;
 import net.minecraft.util.hit.EntityHitResult;
 
 public class HitX implements ClientModInitializer {
 
     private static int hitTime = 0;
-    private static int combo = 0;
-    private static int comboTimer = 0;
-
-    private static float lastHealth = -1;
-    private static float lastDamage = 0;
-
-    private static boolean critical = false;
-    private static boolean kill = false;
-
-    private static float shake = 0;
+    private static float animationScale = 1f;
 
     @Override
     public void onInitializeClient() {
@@ -34,142 +22,99 @@ public class HitX implements ClientModInitializer {
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
 
-            HitXConfig config = AutoConfig.getConfigHolder(HitXConfig.class).getConfig();
-            if (!config.enabled) return;
             if (client.player == null) return;
 
+            HitXConfig config = AutoConfig.getConfigHolder(HitXConfig.class).getConfig();
+
             if (client.crosshairTarget instanceof EntityHitResult hit) {
-                if (hit.getEntity() instanceof LivingEntity target) {
-
-                    if (lastHealth < 0) {
-                        lastHealth = target.getHealth();
-                    }
-
+                if (hit.getEntity() instanceof LivingEntity) {
                     if (client.player.handSwinging) {
-
-                        float newHealth = target.getHealth();
-                        lastDamage = Math.max(0, lastHealth - newHealth);
-                        lastHealth = newHealth;
-
                         hitTime = config.duration;
-                        combo++;
-                        comboTimer = 40;
-
-                        critical = client.player.fallDistance > 0 && !client.player.isOnGround();
-                        kill = newHealth <= 0;
-
-                        shake = 4f;
-
-                        if (config.sound) {
-                            client.player.playSound(
-                                    SoundEvents.ENTITY_EXPERIENCE_ORB_PICKUP,
-                                    0.7f,
-                                    critical ? 0.7f : 1.5f
-                            );
-                        }
+                        animationScale = 1.6f; // pop efekti
                     }
                 }
             }
 
-            if (hitTime > 0) hitTime--;
-
-            if (comboTimer > 0) {
-                comboTimer--;
-            } else {
-                combo = 0;
+            if (hitTime > 0) {
+                hitTime--;
+                animationScale -= 0.05f;
+                if (animationScale < 1f) animationScale = 1f;
             }
-
-            if (shake > 0) shake *= 0.7f;
         });
 
         HudRenderCallback.EVENT.register((drawContext, tickDelta) -> {
 
-            HitXConfig config = AutoConfig.getConfigHolder(HitXConfig.class).getConfig();
-            if (!config.enabled) return;
             if (hitTime <= 0) return;
 
-            MinecraftClient client = MinecraftClient.getInstance();
+            HitXConfig config = AutoConfig.getConfigHolder(HitXConfig.class).getConfig();
 
-            int width = client.getWindow().getScaledWidth();
-            int height = client.getWindow().getScaledHeight();
-
-            int cx = width / 2 + (int)(Math.random() * shake - shake / 2);
-            int cy = height / 2 + (int)(Math.random() * shake - shake / 2);
-
-            float progress = (float) hitTime / config.duration;
-
-            // Smooth easing
-            float eased = (float)Math.sin(progress * Math.PI);
-
-            int alpha = (int) (255 * eased);
-
-            int baseColor = switch (config.color) {
-                case WHITE -> 0xFFFFFF;
-                case RED -> 0xFF0000;
-                case GREEN -> 0x00FF00;
-                case BLUE -> 0x00AAFF;
-                default -> 0xFFFF00;
-            };
-
-            if (critical) baseColor = 0xFF2222;
-
-            int color = (alpha << 24) | baseColor;
-
-            int dynamicSize = (int)(config.size * (1.0f + (1 - eased)));
-
-            drawRing(drawContext, cx, cy, dynamicSize, 2, color);
-
-            // Kill shockwave
-            if (kill) {
-                drawRing(drawContext, cx, cy, dynamicSize + 12, 3,
-                        (alpha << 24) | 0xFFFFFF);
-            }
-
-            // Damage number
-            if (lastDamage > 0) {
-                drawContext.drawCenteredTextWithShadow(
-                        client.textRenderer,
-                        Text.literal("-" + String.format("%.1f", lastDamage)),
-                        cx,
-                        cy - dynamicSize - 12,
-                        0xFF5555
-                );
-            }
-
-            // Combo counter
-            if (combo > 1) {
-                drawContext.drawCenteredTextWithShadow(
-                        client.textRenderer,
-                        Text.literal("x" + combo),
-                        cx,
-                        cy + dynamicSize + 8,
-                        0xFFFFFF
-                );
-            }
-
-            // Critical flash overlay
-            if (critical) {
-                int flashAlpha = (int)(120 * eased);
-                drawContext.fill(0, 0, width, height,
-                        (flashAlpha << 24) | 0xFF0000);
-            }
+            renderHitMarker(drawContext, config);
         });
     }
 
-    private void drawRing(DrawContext context, int cx, int cy,
-                          int radius, int thickness, int color) {
+    private void renderHitMarker(DrawContext context, HitXConfig config) {
 
-        for (int i = 0; i < 360; i += 6) {
+        MinecraftClient client = MinecraftClient.getInstance();
 
-            double rad = Math.toRadians(i);
+        int width = client.getWindow().getScaledWidth();
+        int height = client.getWindow().getScaledHeight();
 
-            int x1 = cx + (int)(Math.cos(rad) * radius);
-            int y1 = cy + (int)(Math.sin(rad) * radius);
+        int centerX = width / 2;
+        int centerY = height / 2;
 
-            int x2 = cx + (int)(Math.cos(rad) * (radius - thickness));
-            int y2 = cy + (int)(Math.sin(rad) * (radius - thickness));
+        float progress = (float) hitTime / config.duration;
+        int alpha = (int) (255 * progress);
 
-            context.fill(x1, y1, x2 + 1, y2 + 1, color);
+        int size = (int) (config.size * animationScale);
+
+        int color = (alpha << 24) |
+                (config.red << 16) |
+                (config.green << 8) |
+                config.blue;
+
+        switch (config.effectLevel) {
+
+            case 1 -> drawCircle(context, centerX, centerY, size, color);
+
+            case 2 -> {
+                drawCircle(context, centerX, centerY, size, color);
+                drawCross(context, centerX, centerY, size, color);
+            }
+
+            case 3 -> {
+                drawCircle(context, centerX, centerY, size, color);
+                drawCross(context, centerX, centerY, size, color);
+                drawPulse(context, centerX, centerY, size + 4, alpha);
+            }
         }
     }
-                }
+
+    private void drawCircle(DrawContext context, int cx, int cy, int radius, int color) {
+        for (int i = 0; i < 360; i += 6) {
+            double rad = Math.toRadians(i);
+            int x = (int) (cx + Math.cos(rad) * radius);
+            int y = (int) (cy + Math.sin(rad) * radius);
+            context.fill(x, y, x + 2, y + 2, color);
+        }
+    }
+
+    private void drawCross(DrawContext context, int cx, int cy, int size, int color) {
+        int thickness = 2;
+
+        context.fill(cx - size, cy - thickness, cx + size, cy + thickness, color);
+        context.fill(cx - thickness, cy - size, cx + thickness, cy + size, color);
+    }
+
+    private void drawPulse(DrawContext context, int cx, int cy, int radius, int alpha) {
+
+        int pulseAlpha = (int) (alpha * 0.4f);
+        int pulseColor = (pulseAlpha << 24) | 0xFFFFFF;
+
+        for (int i = 0; i < 360; i += 12) {
+            double rad = Math.toRadians(i);
+            int x = (int) (cx + Math.cos(rad) * radius);
+            int y = (int) (cy + Math.sin(rad) * radius);
+            context.fill(x, y, x + 3, y + 3, pulseColor);
+        }
+    }
+                           }
