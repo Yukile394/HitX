@@ -1,0 +1,13 @@
+{
+  "modmenu.nameTranslation.hitx": "HitX",
+  "modmenu.descriptionTranslation.hitx": "Gerçek hasarda ekranda hitmarker (X) gösterir.",
+
+  "text.autoconfig.hitx.title": "HitX Ayarları",
+
+  "text.autoconfig.hitx.option.enabled": "Mod Aktif",
+  "text.autoconfig.hitx.option.size": "X Boyutu",
+  "text.autoconfig.hitx.option.duration": "Gösterim Süresi (tick)",
+  "text.autoconfig.hitx.option.color": "X Rengi",
+  "text.autoconfig.hitx.option.damageColor": "Hasarda Kırmızı Yap",
+  "text.autoconfig.hitx.option.fade": "Fade Efekti"
+}
