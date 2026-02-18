@@ -1,26 +1,34 @@
-package com.exloran.hitx;
+package com.exloran.hitx.config;
 
 import me.shedaniel.autoconfig.ConfigData;
 import me.shedaniel.autoconfig.annotation.Config;
+import me.shedaniel.autoconfig.annotation.ConfigEntry;
 
 @Config(name = "hitx")
 public class HitXConfig implements ConfigData {
 
-    // Mod açık / kapalı
+    @ConfigEntry.Gui.Tooltip
     public boolean enabled = true;
 
-    // X boyutu
+    @ConfigEntry.Gui.Tooltip
+    public boolean sound = true;
+
+    @ConfigEntry.Gui.Tooltip
+    @ConfigEntry.BoundedDiscrete(min = 2, max = 20)
     public int size = 6;
 
-    // X süresi (tick)
+    @ConfigEntry.Gui.Tooltip
+    @ConfigEntry.BoundedDiscrete(min = 1, max = 20)
     public int duration = 8;
 
-    // X rengi (white, red, green, vb.)
-    public String color = "white";
+    @ConfigEntry.Gui.EnumHandler(option = ConfigEntry.Gui.EnumHandler.EnumDisplayOption.BUTTON)
+    public ColorMode color = ColorMode.YELLOW;
 
-    // Hasar alınca kırmızıya dönsün mü
-    public boolean damageColor = true;
-
-    // Fade efekti
-    public boolean fade = true;
+    public enum ColorMode {
+        WHITE,
+        YELLOW,
+        RED,
+        GREEN,
+        BLUE
+    }
 }
