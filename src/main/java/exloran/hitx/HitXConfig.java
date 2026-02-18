@@ -1,4 +1,4 @@
-package com.exloran.hitx.config;
+package com.exloran.hitx;
 
 import me.shedaniel.autoconfig.ConfigData;
 import me.shedaniel.autoconfig.annotation.Config;
@@ -7,25 +7,18 @@ import me.shedaniel.autoconfig.annotation.ConfigEntry;
 @Config(name = "hitx")
 public class HitXConfig implements ConfigData {
 
-    public boolean enabled = true;
-    public boolean sound = true;
-    public boolean comboCounter = true;
-    public boolean criticalEffect = true;
-    public boolean killEffect = true;
+    @ConfigEntry.BoundedDiscrete(min = 4, max = 20)
+    public int duration = 8;
 
     @ConfigEntry.BoundedDiscrete(min = 4, max = 30)
-    public int size = 10;
+    public int size = 8;
 
-    @ConfigEntry.BoundedDiscrete(min = 5, max = 20)
-    public int duration = 10;
+    @ConfigEntry.ColorPicker
+    public int red = 255;
 
-    public ColorMode color = ColorMode.YELLOW;
+    public int green = 255;
+    public int blue = 255;
 
-    public enum ColorMode {
-        WHITE,
-        YELLOW,
-        RED,
-        GREEN,
-        BLUE
-    }
+    @ConfigEntry.BoundedDiscrete(min = 1, max = 3)
+    public int effectLevel = 3;
 }
