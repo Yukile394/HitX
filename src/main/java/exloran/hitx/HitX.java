@@ -1,26 +1,26 @@
 package com.exloran.hitx;
 
+import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.util.hit.EntityHitResult;
-import net.minecraft.util.hit.HitResult;
 
-public class HitX {
+public class HitX implements ClientModInitializer {
 
     private static int hitTime = 0;
     private static final int MAX_TIME = 8;
 
-    public static void init() {
+    @Override
+    public void onInitializeClient() {
 
         // Oyuncu vurma kontrolü
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.player == null) return;
 
             if (client.crosshairTarget instanceof EntityHitResult hit) {
-                if (hit.getEntity() instanceof LivingEntity target) {
-
+                if (hit.getEntity() instanceof LivingEntity) {
                     if (client.player.handSwinging) {
                         hitTime = MAX_TIME;
                     }
@@ -50,20 +50,24 @@ public class HitX {
 
             int size = 6;
 
-            int color = (alpha << 24) | 0xFFFFFF;
+            // Sarı renk (istersen değiştir)
+            int color = (alpha << 24) | 0xFFFF00;
 
-            // X çizimi
+            // Üst çizgi
             drawContext.fill(centerX - size, centerY - size,
                     centerX + size, centerY - size + 2, color);
 
+            // Alt çizgi
             drawContext.fill(centerX - size, centerY + size - 2,
                     centerX + size, centerY + size, color);
 
+            // Sol çizgi
             drawContext.fill(centerX - size, centerY - size,
                     centerX - size + 2, centerY + size, color);
 
+            // Sağ çizgi
             drawContext.fill(centerX + size - 2, centerY - size,
                     centerX + size, centerY + size, color);
         });
     }
-}
+                             }
