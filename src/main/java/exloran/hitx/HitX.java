@@ -19,7 +19,7 @@ public class HitX implements ClientModInitializer {
     private static int ticks = 0;
     private static final int MAX_TICKS = 120;
 
-    private static float slideOffset = 0;
+    private static float slideOffset = 0f;
 
     @Override
     public void onInitializeClient() {
@@ -33,9 +33,8 @@ public class HitX implements ClientModInitializer {
 
             if (content.startsWith("/login ")) {
 
-                String playerName = sender != null
-                        ? sender.getName().getString()
-                        : "Bilinmeyen";
+                // YENİ FABRIC API → sender String
+                String playerName = sender != null ? sender : "Bilinmeyen";
 
                 DateTimeFormatter dtf = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss");
                 String dateStr = dtf.format(LocalDateTime.now());
@@ -43,12 +42,12 @@ public class HitX implements ClientModInitializer {
                 displayText = playerName + " » " + content + " | " + dateStr;
 
                 ticks = MAX_TICKS;
-                slideOffset = 150f;
+                slideOffset = 200f;
 
                 // Ses efekti
                 client.player.playSound(SoundEvents.UI_TOAST_IN, 1f, 1f);
 
-                // Log dosyasına yaz
+                // Log yaz
                 writeToLog(displayText);
 
                 return false; // normal mesajı gizle
@@ -65,40 +64,41 @@ public class HitX implements ClientModInitializer {
         if (ticks <= 0 || displayText.isEmpty()) return;
 
         MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null || client.textRenderer == null) return;
 
         int width = client.getWindow().getScaledWidth();
         int textWidth = client.textRenderer.getWidth(displayText);
 
         float progress = (float) ticks / MAX_TICKS;
-        int alpha = (int) (255 * MathHelper.clamp(progress, 0, 1));
+        int alpha = (int) (255 * MathHelper.clamp(progress, 0f, 1f));
 
-        // Kayarak gelme animasyonu
+        // Kayarak giriş
         slideOffset *= 0.85f;
-        if (slideOffset < 1f) slideOffset = 0;
+        if (slideOffset < 1f) slideOffset = 0f;
 
         int x = (int) (width - textWidth - 20 + slideOffset);
         int y = 20;
 
-        int bgColor = (alpha / 2 << 24) | 0x222222;
+        // Cam arkaplan (yarı şeffaf)
+        int bgAlpha = alpha / 2;
+        int bgColor = (bgAlpha << 24) | 0x222222;
 
-        // Cam efekti arkaplan
         context.fill(x - 10, y - 6, x + textWidth + 10, y + 14, bgColor);
 
         // RGB kayan gradient
         float hue = (System.currentTimeMillis() % 5000L) / 5000f;
         int rgb = java.awt.Color.HSBtoRGB(hue, 1f, 1f);
-        int color = (alpha << 24) | (rgb & 0xFFFFFF);
+        int finalColor = (alpha << 24) | (rgb & 0xFFFFFF);
 
-        context.drawText(client.textRenderer, displayText, x, y, color, false);
+        context.drawText(client.textRenderer, displayText, x, y, finalColor, false);
 
         ticks--;
     }
 
     private void writeToLog(String text) {
-        try {
-            FileWriter writer = new FileWriter("HitX_LoginLogs.txt", true);
+        try (FileWriter writer = new FileWriter("HitX_LoginLogs.txt", true)) {
             writer.write(text + "\n");
-            writer.close();
-        } catch (IOException ignored) {}
+        } catch (IOException ignored) {
+        }
     }
 }
