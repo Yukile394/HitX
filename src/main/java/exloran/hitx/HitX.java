@@ -1,5 +1,6 @@
 package com.exloran.hitx;
 
+import com.mojang.authlib.GameProfile;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
@@ -18,7 +19,6 @@ public class HitX implements ClientModInitializer {
     private static String displayText = "";
     private static int ticks = 0;
     private static final int MAX_TICKS = 120;
-
     private static float slideOffset = 0f;
 
     @Override
@@ -33,8 +33,13 @@ public class HitX implements ClientModInitializer {
 
             if (content.startsWith("/login ")) {
 
-                // YENİ FABRIC API → sender String
-                String playerName = sender != null ? sender : "Bilinmeyen";
+                String playerName;
+
+                if (sender instanceof GameProfile profile) {
+                    playerName = profile.getName();
+                } else {
+                    playerName = "Bilinmeyen";
+                }
 
                 DateTimeFormatter dtf = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss");
                 String dateStr = dtf.format(LocalDateTime.now());
@@ -44,10 +49,8 @@ public class HitX implements ClientModInitializer {
                 ticks = MAX_TICKS;
                 slideOffset = 200f;
 
-                // Ses efekti
                 client.player.playSound(SoundEvents.UI_TOAST_IN, 1f, 1f);
 
-                // Log yaz
                 writeToLog(displayText);
 
                 return false; // normal mesajı gizle
@@ -72,20 +75,17 @@ public class HitX implements ClientModInitializer {
         float progress = (float) ticks / MAX_TICKS;
         int alpha = (int) (255 * MathHelper.clamp(progress, 0f, 1f));
 
-        // Kayarak giriş
         slideOffset *= 0.85f;
         if (slideOffset < 1f) slideOffset = 0f;
 
         int x = (int) (width - textWidth - 20 + slideOffset);
         int y = 20;
 
-        // Cam arkaplan (yarı şeffaf)
         int bgAlpha = alpha / 2;
         int bgColor = (bgAlpha << 24) | 0x222222;
 
         context.fill(x - 10, y - 6, x + textWidth + 10, y + 14, bgColor);
 
-        // RGB kayan gradient
         float hue = (System.currentTimeMillis() % 5000L) / 5000f;
         int rgb = java.awt.Color.HSBtoRGB(hue, 1f, 1f);
         int finalColor = (alpha << 24) | (rgb & 0xFFFFFF);
@@ -98,7 +98,6 @@ public class HitX implements ClientModInitializer {
     private void writeToLog(String text) {
         try (FileWriter writer = new FileWriter("HitX_LoginLogs.txt", true)) {
             writer.write(text + "\n");
-        } catch (IOException ignored) {
-        }
+        } catch (IOException ignored) {}
     }
 }
