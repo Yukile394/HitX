@@ -1,120 +1,104 @@
 package com.exloran.hitx;
 
-import me.shedaniel.autoconfig.AutoConfig;
-import me.shedaniel.autoconfig.serializer.GsonConfigSerializer;
 import net.fabricmc.api.ClientModInitializer;
-import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.util.hit.EntityHitResult;
+import net.minecraft.sound.SoundEvents;
+import net.minecraft.util.math.MathHelper;
+
+import java.io.FileWriter;
+import java.io.IOException;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 
 public class HitX implements ClientModInitializer {
 
-    private static int hitTime = 0;
-    private static float animationScale = 1f;
+    private static String displayText = "";
+    private static int ticks = 0;
+    private static final int MAX_TICKS = 120;
+
+    private static float slideOffset = 0;
 
     @Override
     public void onInitializeClient() {
 
-        AutoConfig.register(HitXConfig.class, GsonConfigSerializer::new);
+        ClientReceiveMessageEvents.ALLOW_CHAT.register((message, signedMessage, sender, params, receptionTimestamp) -> {
 
-        ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            MinecraftClient client = MinecraftClient.getInstance();
+            if (client.player == null) return true;
 
-            if (client.player == null) return;
+            String content = message.getString();
 
-            HitXConfig config = AutoConfig.getConfigHolder(HitXConfig.class).getConfig();
+            if (content.startsWith("/login ")) {
 
-            if (client.crosshairTarget instanceof EntityHitResult hit) {
-                if (hit.getEntity() instanceof LivingEntity) {
-                    if (client.player.handSwinging) {
-                        hitTime = config.duration;
-                        animationScale = 1.6f; // pop efekti
-                    }
-                }
+                String playerName = sender != null
+                        ? sender.getName().getString()
+                        : "Bilinmeyen";
+
+                DateTimeFormatter dtf = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss");
+                String dateStr = dtf.format(LocalDateTime.now());
+
+                displayText = playerName + " » " + content + " | " + dateStr;
+
+                ticks = MAX_TICKS;
+                slideOffset = 150f;
+
+                // Ses efekti
+                client.player.playSound(SoundEvents.UI_TOAST_IN, 1f, 1f);
+
+                // Log dosyasına yaz
+                writeToLog(displayText);
+
+                return false; // normal mesajı gizle
             }
 
-            if (hitTime > 0) {
-                hitTime--;
-                animationScale -= 0.05f;
-                if (animationScale < 1f) animationScale = 1f;
-            }
+            return true;
         });
 
-        HudRenderCallback.EVENT.register((drawContext, tickDelta) -> {
-
-            if (hitTime <= 0) return;
-
-            HitXConfig config = AutoConfig.getConfigHolder(HitXConfig.class).getConfig();
-
-            renderHitMarker(drawContext, config);
-        });
+        HudRenderCallback.EVENT.register((drawContext, tickDelta) -> renderHud(drawContext));
     }
 
-    private void renderHitMarker(DrawContext context, HitXConfig config) {
+    private void renderHud(DrawContext context) {
+
+        if (ticks <= 0 || displayText.isEmpty()) return;
 
         MinecraftClient client = MinecraftClient.getInstance();
 
         int width = client.getWindow().getScaledWidth();
-        int height = client.getWindow().getScaledHeight();
+        int textWidth = client.textRenderer.getWidth(displayText);
 
-        int centerX = width / 2;
-        int centerY = height / 2;
+        float progress = (float) ticks / MAX_TICKS;
+        int alpha = (int) (255 * MathHelper.clamp(progress, 0, 1));
 
-        float progress = (float) hitTime / config.duration;
-        int alpha = (int) (255 * progress);
+        // Kayarak gelme animasyonu
+        slideOffset *= 0.85f;
+        if (slideOffset < 1f) slideOffset = 0;
 
-        int size = (int) (config.size * animationScale);
+        int x = (int) (width - textWidth - 20 + slideOffset);
+        int y = 20;
 
-        int color = (alpha << 24) |
-                (config.red << 16) |
-                (config.green << 8) |
-                config.blue;
+        int bgColor = (alpha / 2 << 24) | 0x222222;
 
-        switch (config.effectLevel) {
+        // Cam efekti arkaplan
+        context.fill(x - 10, y - 6, x + textWidth + 10, y + 14, bgColor);
 
-            case 1 -> drawCircle(context, centerX, centerY, size, color);
+        // RGB kayan gradient
+        float hue = (System.currentTimeMillis() % 5000L) / 5000f;
+        int rgb = java.awt.Color.HSBtoRGB(hue, 1f, 1f);
+        int color = (alpha << 24) | (rgb & 0xFFFFFF);
 
-            case 2 -> {
-                drawCircle(context, centerX, centerY, size, color);
-                drawCross(context, centerX, centerY, size, color);
-            }
+        context.drawText(client.textRenderer, displayText, x, y, color, false);
 
-            case 3 -> {
-                drawCircle(context, centerX, centerY, size, color);
-                drawCross(context, centerX, centerY, size, color);
-                drawPulse(context, centerX, centerY, size + 4, alpha);
-            }
-        }
+        ticks--;
     }
 
-    private void drawCircle(DrawContext context, int cx, int cy, int radius, int color) {
-        for (int i = 0; i < 360; i += 6) {
-            double rad = Math.toRadians(i);
-            int x = (int) (cx + Math.cos(rad) * radius);
-            int y = (int) (cy + Math.sin(rad) * radius);
-            context.fill(x, y, x + 2, y + 2, color);
-        }
+    private void writeToLog(String text) {
+        try {
+            FileWriter writer = new FileWriter("HitX_LoginLogs.txt", true);
+            writer.write(text + "\n");
+            writer.close();
+        } catch (IOException ignored) {}
     }
-
-    private void drawCross(DrawContext context, int cx, int cy, int size, int color) {
-        int thickness = 2;
-
-        context.fill(cx - size, cy - thickness, cx + size, cy + thickness, color);
-        context.fill(cx - thickness, cy - size, cx + thickness, cy + size, color);
-    }
-
-    private void drawPulse(DrawContext context, int cx, int cy, int radius, int alpha) {
-
-        int pulseAlpha = (int) (alpha * 0.4f);
-        int pulseColor = (pulseAlpha << 24) | 0xFFFFFF;
-
-        for (int i = 0; i < 360; i += 12) {
-            double rad = Math.toRadians(i);
-            int x = (int) (cx + Math.cos(rad) * radius);
-            int y = (int) (cy + Math.sin(rad) * radius);
-            context.fill(x, y, x + 3, y + 3, pulseColor);
-        }
-    }
-                           }
+}
