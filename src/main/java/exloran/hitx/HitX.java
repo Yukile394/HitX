@@ -48,13 +48,12 @@ public class HitX implements ClientModInitializer {
     }
 
     private void registerModules() {
-        modules.add(new Module("Killaura", "4 bloktaki herkese vurur", false));
-        modules.add(new Module("Speed", "Hızlı hareket", false));
-        modules.add(new Module("Flight", "Uçma sağlar", false));
-        modules.add(new Module("FullBright", "Karanlığı siler", true));
-        modules.add(new Module("NoFall", "Düşme hasarını siler", false));
-        modules.add(new Module("Spider", "Duvara tırmanır", false));
-        modules.add(new Module("AutoWalk", "Otomatik yürür", false));
+        modules.add(new Module("Killaura", "Vuruş hilesi", false));
+        modules.add(new Module("Speed", "Hızlı koşu", false));
+        modules.add(new Module("Flight", "Uçma", false));
+        modules.add(new Module("FullBright", "Parlaklık", true));
+        modules.add(new Module("NoFall", "Hasar engelleme", false));
+        modules.add(new Module("Spider", "Tırmanma", false));
     }
 
     private void renderArrayList(DrawContext context) {
@@ -80,27 +79,26 @@ public class HitX implements ClientModInitializer {
         }
     }
 
-    // 🖱️ Menü: Bulanıklık Kaldırıldı, Fare Destekli
     public static class ClickGUI extends Screen {
         protected ClickGUI() { super(Text.of("HitX Menu")); }
 
         @Override
         public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-            // Bulanıklığı engelleyen şeffaf siyah katman
-            context.fill(0, 0, this.width, this.height, 0x66000000);
+            // Arka planı kendimiz çiziyoruz (Bulanıklık yok!)
+            context.fill(0, 0, this.width, this.height, 0x44000000);
             
-            int x = 60, y = 60;
-            context.fill(x - 5, y - 10, x + 155, y + 180, 0xDD0F0F0F);
-            context.drawText(this.textRenderer, "§d§lHitX §f- PREM", x + 5, y, 0xFFFFFF, true);
-            context.fill(x, y + 12, x + 145, y + 13, 0xFF55FFFF); // Turkuaz çizgi
+            int x = 70, y = 70;
+            context.fill(x - 5, y - 10, x + 150, y + 150, 0xEE050505);
+            context.drawText(this.textRenderer, "§bHitX §f- 1.21", x + 5, y, 0xFFFFFF, true);
+            context.fill(x, y + 12, x + 140, y + 13, 0xFF00AAAA);
 
             int modY = y + 25;
             for (Module m : modules) {
-                boolean hovered = mouseX >= x && mouseX <= x + 145 && mouseY >= modY && mouseY <= modY + 11;
-                int color = m.isEnabled() ? 0xFF55FF55 : 0xFFBBBBBB;
+                boolean hovered = mouseX >= x && mouseX <= x + 140 && mouseY >= modY && mouseY <= modY + 11;
+                int color = m.isEnabled() ? 0xFF00FFCC : 0xFFFFFFFF;
                 
-                if (hovered) context.fill(x, modY - 1, x + 145, modY + 10, 0x33FFFFFF);
-                context.drawText(this.textRenderer, (m.isEnabled() ? "§a• " : "§c◦ ") + m.getName(), x + 10, modY, color, false);
+                if (hovered) context.fill(x, modY - 1, x + 140, modY + 10, 0x22FFFFFF);
+                context.drawText(this.textRenderer, (m.isEnabled() ? "§a[+] " : "§c[-] ") + m.getName(), x + 10, modY, color, false);
                 modY += 13;
             }
             super.render(context, mouseX, mouseY, delta);
@@ -108,9 +106,9 @@ public class HitX implements ClientModInitializer {
 
         @Override
         public boolean mouseClicked(double mouseX, double mouseY, int button) {
-            int x = 60, modY = 85;
+            int x = 70, modY = 95;
             for (Module m : modules) {
-                if (mouseX >= x && mouseX <= x + 145 && mouseY >= modY && mouseY <= modY + 12) {
+                if (mouseX >= x && mouseX <= x + 140 && mouseY >= modY && mouseY <= modY + 12) {
                     m.toggle();
                     return true;
                 }
@@ -119,13 +117,15 @@ public class HitX implements ClientModInitializer {
             return super.mouseClicked(mouseX, mouseY, button);
         }
 
-        @Override public boolean renderBackground(DrawContext context, int mouseX, int mouseY, float delta) {
-            return false; // Varsayılan bulanık arka planı iptal eder!
+        // --- ÖNEMLİ: Hata veren kısmı düzelttim ---
+        @Override
+        public void renderBackground(DrawContext context, int mouseX, int mouseY, float delta) {
+            // Burayı boş bırakıyoruz ki Minecraft'ın varsayılan bulanık ekranı gelmesin.
         }
+
         @Override public boolean shouldPause() { return false; }
     }
 
-    // 📦 Gelişmiş Modül Mantığı
     public static class Module {
         private String name, desc;
         private boolean enabled;
@@ -141,37 +141,42 @@ public class HitX implements ClientModInitializer {
         public void onUpdate(MinecraftClient client) {
             if (client.player == null) return;
 
-            // ⚔️ KILLAURA (Çalışan Versiyon)
+            // ⚔️ KILLAURA FIX
             if (name.equals("Killaura")) {
-                for (Entity entity : client.world.getEntities()) {
-                    if (entity instanceof PlayerEntity && entity != client.player && client.player.distanceTo(entity) < 4.2) {
-                        client.interactionManager.attackEntity(client.player, entity);
-                        client.player.networkHandler.sendPacket(new HandSwingC2SPacket(Hand.MAIN_HAND));
-                        break;
+                for (Entity e : client.world.getEntities()) {
+                    if (e instanceof PlayerEntity && e != client.player && client.player.distanceTo(e) < 4.0) {
+                        if (client.player.getAttackCooldownProgress(0.5f) >= 1.0f) {
+                            client.interactionManager.attackEntity(client.player, e);
+                            client.player.networkHandler.sendPacket(new HandSwingC2SPacket(Hand.MAIN_HAND));
+                        }
                     }
                 }
             }
 
-            // 🕊️ MOVEMENT (Hız ve Uçuş)
-            if (name.equals("Speed") && client.player.isOnGround()) {
-                client.player.updateVelocity(0.15f, new Vec3d(0, 0, 1)); // İleri itiş
+            // 🏃 SPEED FIX (Yavaşlatmadan ivme verir)
+            if (name.equals("Speed") && client.player.isOnGround() && client.player.input.movementForward > 0) {
+                client.player.jump();
+                Vec3d v = client.player.getVelocity();
+                client.player.setVelocity(v.x * 1.3, v.y, v.z * 1.3);
             }
+
             if (name.equals("Flight")) {
                 client.player.getAbilities().flying = true;
+                client.player.getAbilities().setFlySpeed(0.1f);
             } else if (!name.equals("Flight") && !client.player.isCreative()) {
                 client.player.getAbilities().flying = false;
             }
 
-            // 👁️ VISUAL & MISC
             if (name.equals("FullBright")) client.options.getGamma().setValue(100.0);
-            if (name.equals("NoFall") && client.player.fallDistance > 2f) {
+            
+            if (name.equals("NoFall") && client.player.fallDistance > 2.5f) {
                 client.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.OnGroundOnly(true));
+                client.player.fallDistance = 0;
             }
+
             if (name.equals("Spider") && client.player.horizontalCollision) {
-                Vec3d vel = client.player.getVelocity();
-                client.player.setVelocity(vel.x, 0.25, vel.z);
+                client.player.setVelocity(client.player.getVelocity().x, 0.3, client.player.getVelocity().z);
             }
-            if (name.equals("AutoWalk")) client.options.forwardKey.setPressed(true);
         }
     }
 }
