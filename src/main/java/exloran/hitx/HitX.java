@@ -1,16 +1,16 @@
 package com.exloran.hitx;
 
 import net.fabricmc.api.ClientModInitializer;
-import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
+import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
+import net.fabricmc.fabric.api.client.screen.v1.Screens;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.gui.screen.ingame.GenericContainerScreen;
 import net.minecraft.client.gui.screen.ingame.InventoryScreen;
+import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.util.InputUtil;
-import net.minecraft.screen.slot.SlotActionType;
-import org.lwjgl.glfw.GLFW;
+import net.minecraft.text.Text;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -19,85 +19,74 @@ public class HitX implements ClientModInitializer {
 
     public static final List<Module> modules = new ArrayList<>();
     private static KeyBinding guiKey;
-    private static boolean fastPlaceEnabled = true;
 
     @Override
     public void onInitializeClient() {
-        // GUI Açma Tuşu (G varsayılan)
-        guiKey = new KeyBinding("key.hitx.gui", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_G, "category.hitx");
+        // Ekranlar açıldığında butonları enjekte etmek için event kaydı
+        ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
+            
+            // --- 1. SANDIK (CHEST) EKRANI: SAĞ TARAFTAKİ LİSTE ---
+            if (screen instanceof GenericContainerScreen) {
+                // Sandık GUI'sinin orta noktasından sağa doğru hizalama
+                int xPos = (scaledWidth / 2) + 92; 
+                int yPos = (scaledHeight / 2) - 80;
 
-        ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            if (guiKey.wasPressed()) {
-                client.setScreen(new ClickGUI());
-            }
+                String[] buttonLabels = {
+                    "Merşeyi At", "Oto Ekipman", "Herşeyi Koy", "Herşeyi Al", "Çöpleri At"
+                };
 
-            // Hızlı Blok Koyma (FastPlace) Mantığı
-            if (client.player != null && fastPlaceEnabled) {
-                if (client.options.useKey.isPressed()) {
-                    try {
-                        // Minecraft'ın blok koyma gecikmesini bypass eder (Trap kapatma için)
-                        java.lang.reflect.Field field = MinecraftClient.class.getDeclaredField("itemUseCallbackTicks");
-                        field.setAccessible(true);
-                        field.setInt(client, 0);
-                    } catch (Exception ignored) {}
+                for (int i = 0; i < buttonLabels.length; i++) {
+                    final String label = buttonLabels[i];
+                    Screens.getButtons(screen).add(ButtonWidget.builder(Text.literal(label), button -> {
+                        // Buraya tıklama işlevi (logic) gelecek
+                        if (client.player != null) {
+                            client.player.sendMessage(Text.literal("§a" + label + " tıklandı!"), true);
+                        }
+                    }).dimensions(xPos, yPos + (i * 24), 85, 20).build());
                 }
             }
+
+            // --- 2. ENVANTER EKRANI: KÖŞELERDEKİ SİMETRİK BUTONLAR ---
+            if (screen instanceof InventoryScreen) {
+                int invWidth = 176;
+                int invHeight = 166;
+                int x = (scaledWidth - invWidth) / 2;
+                int y = (scaledHeight - invHeight) / 2;
+
+                // Sol Üst (İşaretli yer 1)
+                Screens.getButtons(screen).add(ButtonWidget.builder(Text.literal("⚙"), b -> {})
+                        .dimensions(x - 22, y + 5, 20, 20).build());
+
+                // Sağ Üst (İşaretli yer 2)
+                Screens.getButtons(screen).add(ButtonWidget.builder(Text.literal("X"), b -> {})
+                        .dimensions(x + invWidth + 2, y + 5, 20, 20).build());
+
+                // Sol Alt (İşaretli yer 3)
+                Screens.getButtons(screen).add(ButtonWidget.builder(Text.literal("S"), b -> {})
+                        .dimensions(x - 22, y + 141, 20, 20).build());
+
+                // Sağ Alt (İşaretli yer 4)
+                Screens.getButtons(screen).add(ButtonWidget.builder(Text.literal("C"), b -> {})
+                        .dimensions(x + invWidth + 2, y + 141, 20, 20).build());
+            }
         });
-
-        // Ekrana Bilgileri Yazdırma (PVP/Envanter Ayrımı)
-        HudRenderCallback.EVENT.register((drawContext, tickDelta) -> {
-            renderModInfo(drawContext);
-        });
-    }
-
-    private void renderModInfo(DrawContext ctx) {
-        MinecraftClient client = MinecraftClient.getInstance();
-        if (client.currentScreen == null) return;
-
-        // Sadece Envanter açıkken göster
-        if (client.currentScreen instanceof InventoryScreen) {
-            int x = 10; // Sol kenardan boşluk
-            int y = 10; // Üst kenardan boşluk
-
-            // Bilgi Kutusu Tasarımı (Fotoğraftaki gibi sol üst)
-            ctx.fill(x, y, x + 100, y + 45, 0x90000000); // Yarı saydam arka plan
-            ctx.drawText(client.textRenderer, "§bHitX§r | §aAKTİF§r", x + 5, y + 5, 0xFFFFFF, true);
-            ctx.drawText(client.textRenderer, "--------------", x + 5, y + 15, 0x808080, true);
-            
-            // İstediğin PVP Modu Göstergesi
-            ctx.drawText(client.textRenderer, "MOD: §ePvP 1§r", x + 5, y + 25, 0xFFFFFF, true);
-            ctx.drawText(client.textRenderer, "[Envanter Gecerli]", x + 5, y + 35, 0xA0A0A0, true);
-        }
     }
 
     // ================= GUI =================
     public static class ClickGUI extends Screen {
         protected ClickGUI() {
-            super(null);
+            super(Text.literal("HitX GUI"));
         }
 
         @Override
         public void render(DrawContext ctx, int mouseX, int mouseY, float delta) {
-            ctx.fillGradient(0, 0, this.width, this.height, 0x20000000, 0x80000000);
-            ctx.drawCenteredTextWithShadow(this.textRenderer, "HitX Mod Menüsü", this.width / 2, 20, 0xFFFFFF);
+            // Boş render yapısı korundu
+            super.render(ctx, mouseX, mouseY, delta);
         }
 
         @Override
         public boolean mouseClicked(double mouseX, double mouseY, int button) {
-            // "Tümünü At" mantığı burada çalışır (Koordinat kontrolü eklenebilir)
-            if (mouseX > 10 && mouseX < 110 && mouseY > 10 && mouseY < 55) {
-                dropEverything(MinecraftClient.getInstance());
-                return true;
-            }
             return super.mouseClicked(mouseX, mouseY, button);
-        }
-    }
-
-    // Tüm envanteri yere atma fonksiyonu
-    private static void dropEverything(MinecraftClient client) {
-        if (client.player == null) return;
-        for (int i = 0; i < 45; i++) {
-            client.interactionManager.clickSlot(client.player.currentScreenHandler.syncId, i, 1, SlotActionType.THROW, client.player);
         }
     }
 
@@ -112,7 +101,7 @@ public class HitX implements ClientModInitializer {
         }
 
         public void onUpdate(MinecraftClient client) {
-            // Mod güncelleme mantığı
+            // Güncelleme mantığı buraya gelir
         }
     }
 }
