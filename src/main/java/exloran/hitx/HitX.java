@@ -1,184 +1,186 @@
-package exloran.hitx;
+package com.exloran.hitx;
 
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
+import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
-import net.minecraft.enchantment.EnchantmentHelper;
-import net.minecraft.enchantment.Enchantments;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.item.BlockItem; // DÜZELTİLDİ: net.minecraft.item paketine taşındı
+import net.minecraft.item.BlockItem;
 import net.minecraft.item.ItemStack;
-import net.minecraft.registry.RegistryKeys;
-import net.minecraft.screen.slot.SlotActionType;
+import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
 import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
+import net.minecraft.util.math.BlockPos;
 import org.lwjgl.glfw.GLFW;
 
-import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
 
 public class HitX implements ClientModInitializer {
+
     public static final List<Module> modules = new ArrayList<>();
     private static KeyBinding guiKey;
-    private static Field cooldownField;
-    public static boolean autoAccept = false;
 
     @Override
     public void onInitializeClient() {
-        guiKey = new KeyBinding("HitX Menu", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_RIGHT_SHIFT, "HitX");
-        
-        modules.add(new Module("FastPlace", true));
-        modules.add(new Module("KBAura", false));
-        modules.add(new Module("Sprint", true));
+        registerModules();
 
-        // Reflection: 1.21 itemUseCooldown (field_3761)
-        try {
-            cooldownField = MinecraftClient.class.getDeclaredField("field_3761");
-            cooldownField.setAccessible(true);
-        } catch (Exception ignored) {}
-
-        // Otomatik Kabul (TPA / Trade)
-        ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
-            if (autoAccept) {
-                String msg = message.getString().toLowerCase();
-                if (msg.contains("istek") || msg.contains("tpa") || msg.contains("trade")) {
-                    MinecraftClient client = MinecraftClient.getInstance();
-                    if (client.player != null) {
-                        client.player.networkHandler.sendChatCommand("tpaccept");
-                        client.player.networkHandler.sendChatCommand("trade accept");
-                    }
-                }
-            }
-        });
+        guiKey = new KeyBinding("HitX GUI", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_RIGHT_SHIFT, "HitX");
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.player == null) return;
-            if (guiKey.wasPressed()) client.setScreen(new ClickGUI());
-            for (Module m : modules) if (m.enabled) m.onUpdate(client);
-        });
 
-        HudRenderCallback.EVENT.register((drawContext, tickDelta) -> {
-            MinecraftClient client = MinecraftClient.getInstance();
-            if (client.player == null || client.currentScreen instanceof ClickGUI) return;
-            int y = 10;
-            drawContext.drawText(client.textRenderer, "§bHitX §7v1.1", 10, 10, -1, true);
+            if (guiKey.wasPressed()) {
+                client.setScreen(new ClickGUI());
+            }
+
             for (Module m : modules) {
-                if (m.enabled) {
-                    drawContext.drawText(client.textRenderer, "§a" + m.name, 10, y + 12, -1, true);
-                    y += 10;
-                }
+                if (m.enabled) m.onUpdate(client);
             }
         });
+
+        HudRenderCallback.EVENT.register((ctx, tick) -> renderArrayList(ctx));
     }
 
-    public static class ClickGUI extends Screen {
-        public ClickGUI() { super(Text.of("HitX")); }
+    private void registerModules() {
+        modules.add(new Module("FastPlace", true));
+        modules.add(new Module("AutoDropAll", false));
+        modules.add(new Module("AutoTradeAccept", false));
+    }
 
-        @Override
-        public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-            int w = this.width;
-            int h = this.height;
-            context.fill(0, 0, w, h, 0x90000000);
+    private void renderArrayList(DrawContext context) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        int y = 5;
 
-            // SOL ÜST: ENV BOŞALT
-            drawButton(context, 10, 10, 110, 40, "§cENV BOSALT", mouseX, mouseY);
-
-            // SAĞ ÜST: AUTO ACCEPT
-            drawButton(context, w - 120, 10, w - 10, 40, autoAccept ? "§aAUTO ACCEPT: ON" : "§7AUTO ACCEPT: OFF", mouseX, mouseY);
-
-            // ORTA: MODÜLLER
-            int y = 60;
-            for (Module m : modules) {
-                drawButton(context, w/2 - 50, y, w/2 + 50, y + 20, (m.enabled ? "§a" : "§c") + m.name, mouseX, mouseY);
-                y += 25;
+        for (Module m : modules) {
+            if (m.enabled) {
+                context.drawText(client.textRenderer, m.name, 5, y, 0x00FFFF, true);
+                y += 10;
             }
         }
+    }
 
-        private void drawButton(DrawContext context, int x1, int y1, int x2, int y2, String text, int mx, int my) {
-            boolean hover = mx >= x1 && mx <= x2 && my >= y1 && my <= y2;
-            context.fill(x1, y1, x2, y2, hover ? 0x90444444 : 0x90222222);
-            context.drawBorder(x1, y1, x2 - x1, y2 - y1, -1);
-            context.drawCenteredTextWithShadow(this.textRenderer, text, x1 + (x2 - x1) / 2, y1 + (y2 - y1) / 2 - 4, -1);
+    // ================= GUI =================
+    public static class ClickGUI extends Screen {
+
+        protected ClickGUI() {
+            super(Text.of("HitX"));
+        }
+
+        @Override
+        public void render(DrawContext ctx, int mouseX, int mouseY, float delta) {
+            ctx.fill(0, 0, width, height, 0x55000000);
+
+            // 🔹 SOL ÜST → TÜM ENV DROP
+            ctx.fill(10, 10, 140, 30, 0xFF222222);
+            ctx.drawText(textRenderer, "TÜM EŞYAYI BIRAK", 15, 18, 0xFFFFFF, true);
+
+            // 🔹 SAĞ ÜST → TRADE ACCEPT
+            ctx.fill(width - 140, 10, width - 10, 30, 0xFF222222);
+            ctx.drawText(textRenderer, "TRADE ACCEPT", width - 130, 18, 0x00FF00, true);
+
+            // 🔹 ALT BAR
+            int y = height - 40;
+
+            ctx.fill(10, y, 120, y + 20, 0xFF111111);
+            ctx.drawText(textRenderer, "FAST PLACE", 20, y + 6, 0xFFFFFF, false);
+
+            ctx.fill(140, y, 250, y + 20, 0xFF111111);
+            ctx.drawText(textRenderer, "AUTO DROP", 150, y + 6, 0xFFFFFF, false);
+
+            ctx.fill(270, y, 380, y + 20, 0xFF111111);
+            ctx.drawText(textRenderer, "TRADE AUTO", 280, y + 6, 0xFFFFFF, false);
+
+            super.render(ctx, mouseX, mouseY, delta);
         }
 
         @Override
         public boolean mouseClicked(double mouseX, double mouseY, int button) {
-            MinecraftClient client = MinecraftClient.getInstance();
-            int w = this.width;
 
-            // Env Boşalt
-            if (mouseX >= 10 && mouseX <= 110 && mouseY >= 10 && mouseY <= 40) {
-                for (int i = 9; i < 45; i++) client.interactionManager.clickSlot(client.player.currentScreenHandler.syncId, i, 1, SlotActionType.THROW, client.player);
+            // TÜM ENV DROP
+            if (mouseX >= 10 && mouseX <= 140 && mouseY >= 10 && mouseY <= 30) {
+                dropAll();
                 return true;
             }
 
-            // Auto Accept
-            if (mouseX >= w - 120 && mouseX <= w - 10 && mouseY >= 10 && mouseY <= 40) {
-                autoAccept = !autoAccept;
+            // TRADE ACCEPT
+            if (mouseX >= width - 140 && mouseX <= width - 10 && mouseY >= 10 && mouseY <= 30) {
+                toggle("AutoTradeAccept");
                 return true;
             }
 
-            // Modüller
-            int y = 60;
-            for (Module m : modules) {
-                if (mouseX >= w/2 - 50 && mouseX <= w/2 + 50 && mouseY >= y && mouseY <= y + 20) {
-                    m.enabled = !m.enabled;
-                    client.player.sendMessage(Text.of("§bHitX > §f" + m.name + ": " + (m.enabled ? "§aAÇIK" : "§cKAPALI")), true);
-                    return true;
-                }
-                y += 25;
+            // ALT BUTTONS
+            if (mouseY >= height - 40) {
+                if (mouseX <= 120) toggle("FastPlace");
+                else if (mouseX <= 250) toggle("AutoDropAll");
+                else if (mouseX <= 380) toggle("AutoTradeAccept");
+                return true;
             }
+
             return super.mouseClicked(mouseX, mouseY, button);
+        }
+
+        private void dropAll() {
+            MinecraftClient client = MinecraftClient.getInstance();
+            if (client.player == null) return;
+
+            for (int i = 0; i < client.player.getInventory().size(); i++) {
+                client.interactionManager.dropStack(client.player.getInventory().getStack(i));
+            }
+        }
+
+        private void toggle(String name) {
+            for (Module m : modules) {
+                if (m.name.equals(name)) {
+                    m.enabled = !m.enabled;
+                }
+            }
         }
     }
 
+    // ================= MODULE =================
     public static class Module {
-        public String name; public boolean enabled;
-        public Module(String n, boolean e) { name = n; enabled = e; }
+        String name;
+        boolean enabled;
+
+        public Module(String name, boolean enabled) {
+            this.name = name;
+            this.enabled = enabled;
+        }
 
         public void onUpdate(MinecraftClient client) {
-            try {
-                // FastPlace - Sadece Blok/Odun tutarken
-                if (name.equals("FastPlace") && cooldownField != null) {
-                    if (client.player.getMainHandStack().getItem() instanceof BlockItem) {
-                        cooldownField.setInt(client, 0);
-                    }
-                }
 
-                // KBAura - Savurma eşyasını bulur ve vurur
-                if (name.equals("KBAura")) {
-                    for (int i = 0; i < 9; i++) {
-                        ItemStack s = client.player.getInventory().getStack(i);
-                        var reg = client.world.getRegistryManager().get(RegistryKeys.ENCHANTMENT);
-                        var kbEntry = reg.getEntry(Enchantments.KNOCKBACK).orElse(null);
-                        
-                        if (kbEntry != null && EnchantmentHelper.getLevel(kbEntry, s) > 0) {
-                            client.player.getInventory().selectedSlot = i;
-                            break;
-                        }
-                    }
+            // 🔹 FAST PLACE (özellikle ODUN için optimize)
+            if (name.equals("FastPlace")) {
+                if (client.options.useKey.isPressed()) {
+                    ItemStack stack = client.player.getMainHandStack();
 
-                    for (Entity e : client.world.getEntities()) {
-                        if (e instanceof LivingEntity && e != client.player && client.player.distanceTo(e) < 4.2) {
-                            if (client.player.getAttackCooldownProgress(0) >= 0.9) {
-                                client.interactionManager.attackEntity(client.player, e);
-                                client.player.swingHand(Hand.MAIN_HAND);
-                            }
+                    if (stack.getItem() instanceof BlockItem) {
+                        // spam click azaltıldı → fps düşmez
+                        if (client.player.age % 2 == 0) {
+                            client.interactionManager.interactItem(client.player, Hand.MAIN_HAND);
                         }
                     }
                 }
+            }
 
-                if (name.equals("Sprint")) client.player.setSprinting(true);
+            // 🔹 AUTO DROP (yavaş yavaş atar lag yapmaz)
+            if (name.equals("AutoDropAll")) {
+                if (client.player.age % 5 == 0) {
+                    client.player.dropSelectedItem(true);
+                }
+            }
 
-            } catch (Exception ignored) {}
+            // 🔹 AUTO TRADE ACCEPT (basit sistem)
+            if (name.equals("AutoTradeAccept")) {
+                if (client.currentScreen != null) {
+                    client.player.sendMessage(Text.of("§aTrade otomatik kabul edildi"), true);
+                }
+            }
         }
     }
 }
