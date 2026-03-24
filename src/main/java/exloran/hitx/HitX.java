@@ -1,10 +1,9 @@
-package com.exloran.hitx;
+package exloran.hitx;
 
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
-import net.minecraft.block.BlockItem;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
@@ -14,6 +13,7 @@ import net.minecraft.enchantment.EnchantmentHelper;
 import net.minecraft.enchantment.Enchantments;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.item.BlockItem; // DÜZELTİLDİ: net.minecraft.item paketine taşındı
 import net.minecraft.item.ItemStack;
 import net.minecraft.registry.RegistryKeys;
 import net.minecraft.screen.slot.SlotActionType;
@@ -35,23 +35,27 @@ public class HitX implements ClientModInitializer {
     public void onInitializeClient() {
         guiKey = new KeyBinding("HitX Menu", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_RIGHT_SHIFT, "HitX");
         
-        // Modülleri ekle
         modules.add(new Module("FastPlace", true));
         modules.add(new Module("KBAura", false));
         modules.add(new Module("Sprint", true));
-        modules.add(new Module("AutoClicker", false));
 
-        // Reflection: Cooldown (Hızlı Koyma) için
+        // Reflection: 1.21 itemUseCooldown (field_3761)
         try {
             cooldownField = MinecraftClient.class.getDeclaredField("field_3761");
             cooldownField.setAccessible(true);
         } catch (Exception ignored) {}
 
-        // Oto Trade/TPA Kabul Etme Mesaj Dinleyici
+        // Otomatik Kabul (TPA / Trade)
         ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
-            if (autoAccept && message.getString().toLowerCase().contains("istek")) {
-                MinecraftClient.getInstance().player.networkHandler.sendChatCommand("tpaccept");
-                MinecraftClient.getInstance().player.networkHandler.sendChatCommand("trade accept");
+            if (autoAccept) {
+                String msg = message.getString().toLowerCase();
+                if (msg.contains("istek") || msg.contains("tpa") || msg.contains("trade")) {
+                    MinecraftClient client = MinecraftClient.getInstance();
+                    if (client.player != null) {
+                        client.player.networkHandler.sendChatCommand("tpaccept");
+                        client.player.networkHandler.sendChatCommand("trade accept");
+                    }
+                }
             }
         });
 
@@ -65,7 +69,7 @@ public class HitX implements ClientModInitializer {
             MinecraftClient client = MinecraftClient.getInstance();
             if (client.player == null || client.currentScreen instanceof ClickGUI) return;
             int y = 10;
-            drawContext.drawText(client.textRenderer, "§bHitX §7v1.0", 10, 10, -1, true);
+            drawContext.drawText(client.textRenderer, "§bHitX §7v1.1", 10, 10, -1, true);
             for (Module m : modules) {
                 if (m.enabled) {
                     drawContext.drawText(client.textRenderer, "§a" + m.name, 10, y + 12, -1, true);
@@ -82,25 +86,20 @@ public class HitX implements ClientModInitializer {
         public void render(DrawContext context, int mouseX, int mouseY, float delta) {
             int w = this.width;
             int h = this.height;
-
-            // Arkaplan
             context.fill(0, 0, w, h, 0x90000000);
 
-            // 1. SOL ÜST: ENV BOŞALT
+            // SOL ÜST: ENV BOŞALT
             drawButton(context, 10, 10, 110, 40, "§cENV BOSALT", mouseX, mouseY);
 
-            // 2. SAĞ ÜST: AUTO ACCEPT
+            // SAĞ ÜST: AUTO ACCEPT
             drawButton(context, w - 120, 10, w - 10, 40, autoAccept ? "§aAUTO ACCEPT: ON" : "§7AUTO ACCEPT: OFF", mouseX, mouseY);
 
-            // 3. ORTA: MODÜLLER
+            // ORTA: MODÜLLER
             int y = 60;
             for (Module m : modules) {
                 drawButton(context, w/2 - 50, y, w/2 + 50, y + 20, (m.enabled ? "§a" : "§c") + m.name, mouseX, mouseY);
                 y += 25;
             }
-
-            // 4. ALT KISIM: EKSTRA BİLGİ
-            context.drawCenteredTextWithShadow(this.textRenderer, "§bHitX - Pojav Edition", w / 2, h - 20, -1);
         }
 
         private void drawButton(DrawContext context, int x1, int y1, int x2, int y2, String text, int mx, int my) {
@@ -115,19 +114,19 @@ public class HitX implements ClientModInitializer {
             MinecraftClient client = MinecraftClient.getInstance();
             int w = this.width;
 
-            // Env Boşalt Tıkla
+            // Env Boşalt
             if (mouseX >= 10 && mouseX <= 110 && mouseY >= 10 && mouseY <= 40) {
                 for (int i = 9; i < 45; i++) client.interactionManager.clickSlot(client.player.currentScreenHandler.syncId, i, 1, SlotActionType.THROW, client.player);
                 return true;
             }
 
-            // Auto Accept Tıkla
+            // Auto Accept
             if (mouseX >= w - 120 && mouseX <= w - 10 && mouseY >= 10 && mouseY <= 40) {
                 autoAccept = !autoAccept;
                 return true;
             }
 
-            // Modüller Tıkla
+            // Modüller
             int y = 60;
             for (Module m : modules) {
                 if (mouseX >= w/2 - 50 && mouseX <= w/2 + 50 && mouseY >= y && mouseY <= y + 20) {
@@ -147,29 +146,28 @@ public class HitX implements ClientModInitializer {
 
         public void onUpdate(MinecraftClient client) {
             try {
-                // 1. FAST PLACE (Sadece Odun/Blok Tutarken)
+                // FastPlace - Sadece Blok/Odun tutarken
                 if (name.equals("FastPlace") && cooldownField != null) {
                     if (client.player.getMainHandStack().getItem() instanceof BlockItem) {
                         cooldownField.setInt(client, 0);
                     }
                 }
 
-                // 2. KBAURA (Savurma Silahını Bulur ve Vurur)
+                // KBAura - Savurma eşyasını bulur ve vurur
                 if (name.equals("KBAura")) {
-                    // Hotbar'da savurma olan silahı ara
                     for (int i = 0; i < 9; i++) {
                         ItemStack s = client.player.getInventory().getStack(i);
                         var reg = client.world.getRegistryManager().get(RegistryKeys.ENCHANTMENT);
                         var kbEntry = reg.getEntry(Enchantments.KNOCKBACK).orElse(null);
                         
                         if (kbEntry != null && EnchantmentHelper.getLevel(kbEntry, s) > 0) {
-                            client.player.getInventory().selectedSlot = i; // Silahı ele al
+                            client.player.getInventory().selectedSlot = i;
                             break;
                         }
                     }
 
                     for (Entity e : client.world.getEntities()) {
-                        if (e instanceof LivingEntity && e != client.player && client.player.distanceTo(e) < 4.0) {
+                        if (e instanceof LivingEntity && e != client.player && client.player.distanceTo(e) < 4.2) {
                             if (client.player.getAttackCooldownProgress(0) >= 0.9) {
                                 client.interactionManager.attackEntity(client.player, e);
                                 client.player.swingHand(Hand.MAIN_HAND);
@@ -178,15 +176,7 @@ public class HitX implements ClientModInitializer {
                     }
                 }
 
-                // 3. SPRINT (Her Zaman Koş)
                 if (name.equals("Sprint")) client.player.setSprinting(true);
-
-                // 4. AUTOCLICKER
-                if (name.equals("AutoClicker") && client.options.attackKey.isPressed()) {
-                    if (client.player.getAttackCooldownProgress(0) >= 0.9) {
-                        client.interactionManager.attackEntity(client.player, client.targetedEntity);
-                    }
-                }
 
             } catch (Exception ignored) {}
         }
