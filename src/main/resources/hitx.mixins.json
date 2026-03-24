@@ -2,10 +2,9 @@
   "required": true,
   "package": "com.exloran.hitx.mixin",
   "compatibilityLevel": "JAVA_21",
-  "client": [
+  "mixins": [
     "MinecraftClientAccessor"
   ],
-  "mixins": [],
   "injectors": {
     "defaultRequire": 1
   }
