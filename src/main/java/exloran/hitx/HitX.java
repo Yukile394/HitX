@@ -1,6 +1,5 @@
-package exloran.hitx;
+package com.exloran.hitx;
 
-import com.exloran.hitx.mixin.MinecraftClientAccessor;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
@@ -17,42 +16,39 @@ import net.minecraft.entity.LivingEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.registry.Registry;
 import net.minecraft.registry.RegistryKeys;
-import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
 import org.lwjgl.glfw.GLFW;
 
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 
 public class HitX implements ClientModInitializer {
     public static final List<Module> modules = new ArrayList<>();
     private static KeyBinding guiKey;
-    private static KeyBinding kbAuraKey;
+    private static Field cooldownField;
 
     @Override
     public void onInitializeClient() {
         guiKey = new KeyBinding("HitX Menu", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_RIGHT_SHIFT, "HitX");
-        kbAuraKey = new KeyBinding("KB Aura", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_V, "HitX");
-
+        
         modules.add(new Module("FastPlace", true));
         modules.add(new Module("KBAura", false));
-        modules.add(new Module("AutoTrade", false));
+
+        // Reflection hazırlığı: MinecraftClient içindeki cooldown alanını buluyoruz
+        try {
+            // field_3761 = itemUseCooldown (Minecraft 1.21 Intermediary adı)
+            cooldownField = MinecraftClient.class.getDeclaredField("field_3761");
+            cooldownField.setAccessible(true);
+        } catch (Exception e) {
+            System.out.println("HitX: Cooldown alani bulunamadi!");
+        }
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.player == null || client.world == null) return;
-
             if (guiKey.wasPressed()) client.setScreen(new ClickGUI());
-            
-            if (kbAuraKey.wasPressed()) {
-                for(Module m : modules) if(m.name.equals("KBAura")) {
-                    m.enabled = !m.enabled;
-                    client.player.sendMessage(Text.of("§bHitX > §fKB Aura: " + (m.enabled ? "§aON" : "§cOFF")), true);
-                }
-            }
-            
             for (Module m : modules) if (m.enabled) m.onUpdate(client);
         });
 
@@ -62,7 +58,7 @@ public class HitX implements ClientModInitializer {
             int y = 10;
             for (Module m : modules) {
                 if (m.enabled) {
-                    drawContext.drawText(client.textRenderer, "§b" + m.name, client.getWindow().getScaledWidth() - client.textRenderer.getWidth(m.name) - 5, y, -1, true);
+                    drawContext.drawText(client.textRenderer, "§b" + m.name, 10, y, -1, true);
                     y += 10;
                 }
             }
@@ -73,8 +69,7 @@ public class HitX implements ClientModInitializer {
         public ClickGUI() { super(Text.of("HitX")); }
         @Override
         public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-            context.fill(10, 10, 110, 30, 0x80000000);
-            context.drawText(this.textRenderer, "ENV BOSALT", 25, 17, -1, true);
+            this.renderBackground(context, mouseX, mouseY, delta);
             int y = 50;
             for (Module m : modules) {
                 context.fill(10, y, 110, y + 15, m.enabled ? 0x8000FF00 : 0x80FF0000);
@@ -84,12 +79,6 @@ public class HitX implements ClientModInitializer {
         }
         @Override
         public boolean mouseClicked(double mouseX, double mouseY, int button) {
-            MinecraftClient client = MinecraftClient.getInstance();
-            if (client.player == null) return false;
-
-            if (mouseX >= 10 && mouseX <= 110 && mouseY >= 10 && mouseY <= 30) {
-                for (int i = 0; i < 45; i++) client.interactionManager.clickSlot(client.player.currentScreenHandler.syncId, i, 1, SlotActionType.THROW, client.player);
-            }
             int y = 50;
             for (Module m : modules) {
                 if (mouseX >= 10 && mouseX <= 110 && mouseY >= y && mouseY <= y + 15) {
@@ -108,25 +97,22 @@ public class HitX implements ClientModInitializer {
 
         public void onUpdate(MinecraftClient client) {
             try {
-                if (name.equals("FastPlace")) {
-                    ((MinecraftClientAccessor)client).setItemUseCooldown(0);
+                if (name.equals("FastPlace") && cooldownField != null) {
+                    cooldownField.setInt(client, 0); // Mixin yerine direkt Reflection ile 0 yapıyoruz
                 }
                 
                 if (name.equals("KBAura")) {
                     ItemStack stack = client.player.getMainHandStack();
-                    if (stack.isEmpty()) return;
-
-                    // getOptional kullanarak derleme hatasını gideriyoruz
-                    Optional<Registry<Enchantment>> reg = client.world.getRegistryManager().getOptional(RegistryKeys.ENCHANTMENT);
-                    if (!reg.isPresent()) return;
-
-                    Optional<RegistryEntry.Reference<Enchantment>> kb = reg.get().getEntry(Enchantments.KNOCKBACK);
-                    if (kb.isPresent() && EnchantmentHelper.getLevel(kb.get(), stack) > 0) {
-                        for (Entity e : client.world.getEntities()) {
-                            if (e instanceof LivingEntity && e != client.player && client.player.distanceTo(e) < 4.5) {
-                                if (client.player.getAttackCooldownProgress(0) >= 0.9) {
-                                    client.interactionManager.attackEntity(client.player, e);
-                                    client.player.swingHand(Hand.MAIN_HAND);
+                    var reg = client.world.getRegistryManager().getOptional(RegistryKeys.ENCHANTMENT);
+                    if (reg.isPresent()) {
+                        var kb = reg.get().getEntry(Enchantments.KNOCKBACK).orElse(null);
+                        if (kb != null && EnchantmentHelper.getLevel(kb, stack) > 0) {
+                            for (Entity e : client.world.getEntities()) {
+                                if (e instanceof LivingEntity && e != client.player && client.player.distanceTo(e) < 4.5) {
+                                    if (client.player.getAttackCooldownProgress(0) >= 0.9) {
+                                        client.interactionManager.attackEntity(client.player, e);
+                                        client.player.swingHand(Hand.MAIN_HAND);
+                                    }
                                 }
                             }
                         }
