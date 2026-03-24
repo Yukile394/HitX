@@ -10,16 +10,18 @@ import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.effect.StatusEffectInstance;
-import net.minecraft.entity.effect.StatusEffects;
-import net.minecraft.network.packet.c2s.play.HandSwingC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
+import net.minecraft.enchantment.EnchantmentHelper;
+import net.minecraft.enchantment.Enchantments;
+import net.minecraft.item.ItemStack;
+import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
+import net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket;
+import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
 import org.lwjgl.glfw.GLFW;
 
-import java.awt.Color;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -27,17 +29,25 @@ public class HitX implements ClientModInitializer {
 
     public static final List<Module> modules = new ArrayList<>();
     private static KeyBinding guiKey;
-    private static boolean sorted = false;
+    private static KeyBinding kbAuraKey; // Savurma Otosu için tuş
 
     @Override
     public void onInitializeClient() {
         registerModules();
-        guiKey = new KeyBinding("HitX GUI", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_RIGHT_SHIFT, "HitX");
+        guiKey = new KeyBinding("HitX Menü", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_RIGHT_SHIFT, "HitX");
+        kbAuraKey = new KeyBinding("Oto Savurma Aç/Kapat", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_V, "HitX");
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.player == null) return;
+            
             if (guiKey.wasPressed()) client.setScreen(new ClickGUI());
             
+            // Tuş ile modül kontrolü
+            if (kbAuraKey.wasPressed()) {
+                getModule("KBAura").toggle();
+                client.player.sendMessage(Text.of("§b[HitX] §fSavurma Modu: " + (getModule("KBAura").isEnabled() ? "§aAÇIK" : "§cKAPALI")), true);
+            }
+
             for (Module m : modules) {
                 if (m.isEnabled()) m.onUpdate(client);
             }
@@ -47,70 +57,68 @@ public class HitX implements ClientModInitializer {
     }
 
     private void registerModules() {
-        // --- AFK & MISC ---
-        modules.add(new Module("AFKFarmer", "AFK Süresini Simüle Eder", false));
-        modules.add(new Module("AutoWalk", "Otomatik yürür", false));
-        
-        // --- Diğer Modüller (Combat, Movement vb.) ---
-        modules.add(new Module("Killaura", "Otomatik vurur", false));
-        modules.add(new Module("Flight", "Uçuş modu", false));
-        modules.add(new Module("FullBright", "Gece görüşü", true));
+        modules.add(new Module("FastPlace", "Odunları hızlı koyar, lag yapmaz", true));
+        modules.add(new Module("KBAura", "Savurma kılıcıyla oto vurur", false));
+        modules.add(new Module("AutoTrade", "Gelen takasları otomatik kabul eder", false));
+    }
+
+    public static Module getModule(String name) {
+        return modules.stream().filter(m -> m.getName().equalsIgnoreCase(name)).findFirst().orElse(null);
     }
 
     private void renderArrayList(DrawContext context) {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.player == null || client.currentScreen instanceof ClickGUI) return;
-
         int y = 5;
         for (Module m : modules) {
             if (m.isEnabled()) {
-                int textWidth = client.textRenderer.getWidth(m.getName());
-                int x = client.getWindow().getScaledWidth() - textWidth - 10;
-                context.fill(x - 4, y - 2, client.getWindow().getScaledWidth(), y + 10, 0x90000000);
-                context.drawText(client.textRenderer, m.getName(), x, y, 0x00FFFF, true);
+                int x = client.getWindow().getScaledWidth() - client.textRenderer.getWidth(m.getName()) - 10;
+                context.drawText(client.textRenderer, "§b" + m.getName(), x, y, 0xFFFFFF, true);
                 y += 11;
             }
         }
     }
 
     public static class ClickGUI extends Screen {
-        protected ClickGUI() { super(Text.of("HitX Menu")); }
+        protected ClickGUI() { super(Text.of("HitX")); }
 
         @Override
         public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-            context.fill(0, 0, this.width, this.height, 0x55000000);
-            
-            // Sol Üst Ödül Butonu
-            int btnX = 10, btnY = 10;
-            boolean hovered = mouseX >= btnX && mouseX <= btnX + 80 && mouseY >= btnY && mouseY <= btnY + 15;
-            context.fill(btnX, btnY, btnX + 80, btnY + 15, hovered ? 0xFF00FFFF : 0xEE111111);
-            context.drawText(this.textRenderer, "ÖDÜLÜ AL", btnX + 15, btnY + 4, 0xFFFFFF, true);
+            // Fotoğraftaki gibi üst köşelere butonlar
+            renderButton(context, 10, 10, 100, 20, "§cENV Boşalt", mouseX, mouseY); // Sol Üst
+            renderButton(context, this.width - 110, 10, 100, 20, "§aTrade Kabul", mouseX, mouseY); // Sağ Üst
 
-            // Ana Menü
-            int x = 50, y = 50;
-            context.fill(x - 5, y - 10, x + 160, y + 200, 0xEE111111);
-            context.drawText(this.textRenderer, "§bHitX §f| §7AFK Modu", x + 5, y, 0xFFFFFF, true);
+            // Orta Menü
+            int x = this.width / 2 - 75;
+            int y = this.height / 2 - 50;
+            context.fill(x, y, x + 150, y + 100, 0xAA000000);
+            context.drawCenteredTextWithShadow(this.textRenderer, "--- HitX Mod Menü ---", this.width / 2, y + 10, 0x00FFFF);
 
             for (int i = 0; i < modules.size(); i++) {
                 Module m = modules.get(i);
-                int modY = y + 25 + (i * 14);
-                context.drawText(this.textRenderer, (m.isEnabled() ? "§a✔ " : "§c✖ ") + m.getName(), x + 10, modY, 0xBBBBBB, false);
+                context.drawText(this.textRenderer, (m.isEnabled() ? "§a[ON] " : "§c[OFF] ") + m.getName(), x + 10, y + 35 + (i * 15), 0xFFFFFF, false);
             }
             super.render(context, mouseX, mouseY, delta);
         }
 
+        private void renderButton(DrawContext context, int x, int y, int w, int h, String text, int mx, int my) {
+            boolean hover = mx >= x && mx <= x + w && my >= y && my <= y + h;
+            context.fill(x, y, x + w, y + h, hover ? 0xEE444444 : 0xEE222222);
+            context.drawCenteredTextWithShadow(this.textRenderer, text, x + w / 2, y + h / 4, 0xFFFFFF);
+        }
+
         @Override
         public boolean mouseClicked(double mouseX, double mouseY, int button) {
-            // Ödül butonu tıklama kontrolü
-            if (mouseX >= 10 && mouseX <= 90 && mouseY >= 10 && mouseY <= 25) {
-                sendInstantPackets();
+            // Env Boşalt (Sol Üst)
+            if (mouseX >= 10 && mouseX <= 110 && mouseY >= 10 && mouseY <= 30) {
+                dropEverything();
                 return true;
             }
-
-            // Modül tıklama kontrolü
-            int x = 50, y = 75;
+            // Modül Tıklama
+            int x = this.width / 2 - 75;
+            int y = this.height / 2 - 15;
             for (int i = 0; i < modules.size(); i++) {
-                if (mouseX >= x && mouseX <= x + 150 && mouseY >= y + (i * 14) && mouseY <= y + (i * 14) + 12) {
+                if (mouseY >= y + (i * 15) && mouseY <= y + (i * 15) + 12) {
                     modules.get(i).toggle();
                     return true;
                 }
@@ -118,13 +126,10 @@ public class HitX implements ClientModInitializer {
             return super.mouseClicked(mouseX, mouseY, button);
         }
 
-        private void sendInstantPackets() {
+        private void dropEverything() {
             MinecraftClient client = MinecraftClient.getInstance();
-            if (client.player != null) {
-                client.player.sendMessage(Text.of("§b[HitX] §fÖdül paketleri gönderiliyor..."), true);
-                for (int i = 0; i < 50; i++) {
-                    client.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.OnGroundOnly(true));
-                }
+            for (int i = 0; i < 45; i++) {
+                client.interactionManager.clickSlot(client.player.currentScreenHandler.syncId, i, 1, SlotActionType.THROW, client.player);
             }
         }
     }
@@ -142,19 +147,32 @@ public class HitX implements ClientModInitializer {
         public void toggle() { this.enabled = !this.enabled; }
 
         public void onUpdate(MinecraftClient client) {
-            if (client.player == null) return;
+            // 1. FastPlace (Hızlı Blok Koyma & Trap Kapatma)
+            if (name.equals("FastPlace")) {
+                client.itemUseCooldown = 0; 
+            }
 
-            // AFK Farmer Mantığı
-            if (name.equals("AFKFarmer")) {
-                if (client.player.age % 40 == 0) { // Her 2 saniyede bir ufak hareket
-                    client.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.Full(
-                        client.player.getX(), client.player.getY() + 0.01, client.player.getZ(),
-                        client.player.getYaw(), client.player.getPitch(), true
-                    ));
+            // 2. KBAura (Savurma Otosu)
+            if (name.equals("KBAura")) {
+                ItemStack stack = client.player.getMainHandStack();
+                // Elindeki eşyada Savurma (Knockback) varsa çalışır
+                if (EnchantmentHelper.getLevel(Enchantments.KNOCKBACK, stack) > 0) {
+                    for (Entity target : client.world.getEntities()) {
+                        if (target instanceof LivingEntity && target != client.player && client.player.distanceTo(target) < 4.5) {
+                            if (client.player.getAttackCooldownProgress(0.5f) >= 1) {
+                                client.interactionManager.attackEntity(client.player, target);
+                                client.player.swingHand(Hand.MAIN_HAND);
+                            }
+                        }
+                    }
                 }
             }
-            
-            // Diğer modül mantıkları (Killaura vb. buraya eklenebilir)
+
+            // 3. AutoTrade (Gelen istekleri oto kabul)
+            if (name.equals("AutoTrade")) {
+                // Bu kısım sunucu komutuna göre değişir, genelde /trade accept yazdırılır
+                // client.player.networkHandler.sendChatCommand("trade accept");
+            }
         }
     }
-                      }
+}
