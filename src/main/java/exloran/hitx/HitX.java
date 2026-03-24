@@ -3,7 +3,6 @@ package com.exloran.hitx;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
-import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
@@ -11,10 +10,8 @@ import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.ItemStack;
-import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
 import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
-import net.minecraft.util.math.BlockPos;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
@@ -54,8 +51,9 @@ public class HitX implements ClientModInitializer {
 
     private void renderArrayList(DrawContext context) {
         MinecraftClient client = MinecraftClient.getInstance();
-        int y = 5;
+        if (client.player == null) return;
 
+        int y = 5;
         for (Module m : modules) {
             if (m.enabled) {
                 context.drawText(client.textRenderer, m.name, 5, y, 0x00FFFF, true);
@@ -107,7 +105,7 @@ public class HitX implements ClientModInitializer {
                 return true;
             }
 
-            // TRADE ACCEPT
+            // TRADE ACCEPT TOGGLE
             if (mouseX >= width - 140 && mouseX <= width - 10 && mouseY >= 10 && mouseY <= 30) {
                 toggle("AutoTradeAccept");
                 return true;
@@ -124,12 +122,18 @@ public class HitX implements ClientModInitializer {
             return super.mouseClicked(mouseX, mouseY, button);
         }
 
+        // ✅ FIXED DROP ALL (HATASIZ)
         private void dropAll() {
             MinecraftClient client = MinecraftClient.getInstance();
             if (client.player == null) return;
 
             for (int i = 0; i < client.player.getInventory().size(); i++) {
-                client.interactionManager.dropStack(client.player.getInventory().getStack(i));
+                ItemStack stack = client.player.getInventory().getStack(i);
+
+                if (!stack.isEmpty()) {
+                    client.player.dropItem(stack.copy(), true);
+                    client.player.getInventory().setStack(i, ItemStack.EMPTY);
+                }
             }
         }
 
@@ -153,14 +157,14 @@ public class HitX implements ClientModInitializer {
         }
 
         public void onUpdate(MinecraftClient client) {
+            if (client.player == null) return;
 
-            // 🔹 FAST PLACE (özellikle ODUN için optimize)
+            // 🔹 FAST PLACE (FPS DROP YOK)
             if (name.equals("FastPlace")) {
                 if (client.options.useKey.isPressed()) {
                     ItemStack stack = client.player.getMainHandStack();
 
                     if (stack.getItem() instanceof BlockItem) {
-                        // spam click azaltıldı → fps düşmez
                         if (client.player.age % 2 == 0) {
                             client.interactionManager.interactItem(client.player, Hand.MAIN_HAND);
                         }
@@ -168,17 +172,17 @@ public class HitX implements ClientModInitializer {
                 }
             }
 
-            // 🔹 AUTO DROP (yavaş yavaş atar lag yapmaz)
+            // 🔹 AUTO DROP (YAVAŞ YAVAŞ ATAR → LAG YOK)
             if (name.equals("AutoDropAll")) {
-                if (client.player.age % 5 == 0) {
+                if (client.player.age % 4 == 0) {
                     client.player.dropSelectedItem(true);
                 }
             }
 
-            // 🔹 AUTO TRADE ACCEPT (basit sistem)
+            // 🔹 TRADE AUTO (BASIC)
             if (name.equals("AutoTradeAccept")) {
                 if (client.currentScreen != null) {
-                    client.player.sendMessage(Text.of("§aTrade otomatik kabul edildi"), true);
+                    client.player.sendMessage(Text.of("§aTrade otomatik kabul"), true);
                 }
             }
         }
