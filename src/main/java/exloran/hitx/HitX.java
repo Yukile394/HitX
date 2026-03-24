@@ -9,99 +9,112 @@ import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.ingame.GenericContainerScreen;
 import net.minecraft.client.gui.screen.ingame.InventoryScreen;
 import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.option.KeyBinding;
+import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.text.Text;
-
-import java.util.ArrayList;
-import java.util.List;
+import net.minecraft.item.Items;
+import net.minecraft.item.ItemStack;
 
 public class HitX implements ClientModInitializer {
 
-    public static final List<Module> modules = new ArrayList<>();
-    private static KeyBinding guiKey;
-
     @Override
     public void onInitializeClient() {
-        // Ekranlar açıldığında butonları enjekte etmek için event kaydı
         ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
             
-            // --- 1. SANDIK (CHEST) EKRANI: SAĞ TARAFTAKİ LİSTE ---
-            if (screen instanceof GenericContainerScreen) {
-                // Sandık GUI'sinin orta noktasından sağa doğru hizalama
+            // ================= 1. SANDIK (CHEST) EKRANI FONKSİYONLARI =================
+            if (screen instanceof GenericContainerScreen container) {
                 int xPos = (scaledWidth / 2) + 92; 
                 int yPos = (scaledHeight / 2) - 80;
+                int syncId = container.getScreenHandler().syncId;
 
-                String[] buttonLabels = {
-                    "Merşeyi At", "Oto Ekipman", "Herşeyi Koy", "Herşeyi Al", "Çöpleri At"
-                };
+                // --- HERŞEYİ AL ---
+                addButton(screen, "Herşeyi Al", xPos, yPos, 85, 20, b -> {
+                    int chestSlots = container.getScreenHandler().getInventory().size();
+                    for (int i = 0; i < chestSlots; i++) {
+                        client.interactionManager.clickSlot(syncId, i, 0, SlotActionType.QUICK_MOVE, client.player);
+                    }
+                });
 
-                for (int i = 0; i < buttonLabels.length; i++) {
-                    final String label = buttonLabels[i];
-                    Screens.getButtons(screen).add(ButtonWidget.builder(Text.literal(label), button -> {
-                        // Buraya tıklama işlevi (logic) gelecek
-                        if (client.player != null) {
-                            client.player.sendMessage(Text.literal("§a" + label + " tıklandı!"), true);
+                // --- HERŞEYİ KOY ---
+                addButton(screen, "Herşeyi Koy", xPos, yPos + 24, 85, 20, b -> {
+                    int chestSlots = container.getScreenHandler().getInventory().size();
+                    for (int i = chestSlots; i < chestSlots + 36; i++) {
+                        client.interactionManager.clickSlot(syncId, i, 0, SlotActionType.QUICK_MOVE, client.player);
+                    }
+                });
+
+                // --- MERŞEYİ AT (DÜNYAYA FIRLAT) ---
+                addButton(screen, "Herşeyi At", xPos, yPos + 48, 85, 20, b -> {
+                    for (int i = 0; i < container.getScreenHandler().slots.size(); i++) {
+                        client.interactionManager.clickSlot(syncId, i, 1, SlotActionType.THROW, client.player);
+                    }
+                });
+
+                // --- ÇÖPLERİ AT (Belirli değersiz itemlar) ---
+                addButton(screen, "Çöpleri At", xPos, yPos + 72, 85, 20, b -> {
+                    for (int i = 0; i < container.getScreenHandler().slots.size(); i++) {
+                        ItemStack stack = container.getScreenHandler().getSlot(i).getStack();
+                        if (isTrash(stack)) {
+                            client.interactionManager.clickSlot(syncId, i, 1, SlotActionType.THROW, client.player);
                         }
-                    }).dimensions(xPos, yPos + (i * 24), 85, 20).build());
-                }
+                    }
+                });
             }
 
-            // --- 2. ENVANTER EKRANI: KÖŞELERDEKİ SİMETRİK BUTONLAR ---
-            if (screen instanceof InventoryScreen) {
-                int invWidth = 176;
-                int invHeight = 166;
-                int x = (scaledWidth - invWidth) / 2;
-                int y = (scaledHeight - invHeight) / 2;
+            // ================= 2. ENVANTER EKRANI FONKSİYONLARI (SİMETRİK) =================
+            if (screen instanceof InventoryScreen inv) {
+                int x = (scaledWidth - 176) / 2;
+                int y = (scaledHeight - 166) / 2;
+                int syncId = inv.getScreenHandler().syncId;
 
-                // Sol Üst (İşaretli yer 1)
-                Screens.getButtons(screen).add(ButtonWidget.builder(Text.literal("⚙"), b -> {})
-                        .dimensions(x - 22, y + 5, 20, 20).build());
+                // SOL ÜST: Otomatik Zırh Giy
+                addButton(screen, "🛡", x - 25, y, 20, 20, b -> {
+                    for (int i = 9; i < 45; i++) {
+                        ItemStack stack = inv.getScreenHandler().getSlot(i).getStack();
+                        if (isArmor(stack)) client.interactionManager.clickSlot(syncId, i, 0, SlotActionType.QUICK_MOVE, client.player);
+                    }
+                });
 
-                // Sağ Üst (İşaretli yer 2)
-                Screens.getButtons(screen).add(ButtonWidget.builder(Text.literal("X"), b -> {})
-                        .dimensions(x + invWidth + 2, y + 5, 20, 20).build());
+                // SAĞ ÜST: Envanter Düzenle (Basit)
+                addButton(screen, "⚙", x + 181, y, 20, 20, b -> {
+                    client.player.sendMessage(Text.literal("§eSıralama Modu Aktif!"), true);
+                });
 
-                // Sol Alt (İşaretli yer 3)
-                Screens.getButtons(screen).add(ButtonWidget.builder(Text.literal("S"), b -> {})
-                        .dimensions(x - 22, y + 141, 20, 20).build());
+                // SOL ALT: HERŞEYİ AT (İşaretlediğin yer - Dünyaya fırlatır)
+                addButton(screen, "🗑", x - 25, y + 145, 20, 20, b -> {
+                    for (int i = 9; i < 45; i++) {
+                        client.interactionManager.clickSlot(syncId, i, 1, SlotActionType.THROW, client.player);
+                    }
+                });
 
-                // Sağ Alt (İşaretli yer 4)
-                Screens.getButtons(screen).add(ButtonWidget.builder(Text.literal("C"), b -> {})
-                        .dimensions(x + invWidth + 2, y + 141, 20, 20).build());
+                // SAĞ ALT: Hotbar Temizle
+                addButton(screen, "H", x + 181, y + 145, 20, 20, b -> {
+                    for (int i = 36; i < 45; i++) {
+                        client.interactionManager.clickSlot(syncId, i, 1, SlotActionType.THROW, client.player);
+                    }
+                });
             }
         });
     }
 
-    // ================= GUI =================
-    public static class ClickGUI extends Screen {
-        protected ClickGUI() {
-            super(Text.literal("HitX GUI"));
-        }
-
-        @Override
-        public void render(DrawContext ctx, int mouseX, int mouseY, float delta) {
-            // Boş render yapısı korundu
-            super.render(ctx, mouseX, mouseY, delta);
-        }
-
-        @Override
-        public boolean mouseClicked(double mouseX, double mouseY, int button) {
-            return super.mouseClicked(mouseX, mouseY, button);
-        }
+    // Yardımcı Buton Ekleme Metodu
+    private void addButton(Screen screen, String text, int x, int y, int w, int h, ButtonWidget.PressAction action) {
+        Screens.getButtons(screen).add(ButtonWidget.builder(Text.literal(text), action).dimensions(x, y, w, h).build());
     }
 
-    // ================= MODULE =================
+    // Çöp Kontrolü
+    private boolean isTrash(ItemStack stack) {
+        return stack.isOf(Items.ROTTEN_FLESH) || stack.isOf(Items.POISONOUS_POTATO) || stack.isOf(Items.DIRT) || stack.isOf(Items.COBBLESTONE);
+    }
+
+    // Zırh Kontrolü
+    private boolean isArmor(ItemStack stack) {
+        String name = stack.getItem().toString();
+        return name.contains("helmet") || name.contains("chestplate") || name.contains("leggings") || name.contains("boots");
+    }
+
+    // Modül ve GUI sınıfları yapısı bozulmadan aşağıda kalabilir...
     public static class Module {
-        String name;
-        boolean enabled;
-
-        public Module(String name, boolean enabled) {
-            this.name = name;
-            this.enabled = enabled;
-        }
-
-        public void onUpdate(MinecraftClient client) {
-            // Güncelleme mantığı buraya gelir
-        }
+        String name; boolean enabled;
+        public Module(String name, boolean enabled) { this.name = name; this.enabled = enabled; }
     }
 }
