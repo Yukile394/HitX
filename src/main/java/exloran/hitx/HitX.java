@@ -39,14 +39,18 @@ public class HitX implements ClientModInitializer {
         modules.add(new Module("AutoTrade", false));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            if (client.player == null) return;
+            // KRITIK: Sunucuya giris yapilmadiysa hiçbir işlem yapma (Çökmeyi önler)
+            if (client.player == null || client.world == null || client.getNetworkHandler() == null) return;
+
             if (guiKey.wasPressed()) client.setScreen(new ClickGUI());
+            
             if (kbAuraKey.wasPressed()) {
                 for(Module m : modules) if(m.name.equals("KBAura")) {
                     m.enabled = !m.enabled;
                     client.player.sendMessage(Text.of("§bHitX > §fKB Aura: " + (m.enabled ? "§aON" : "§cOFF")), true);
                 }
             }
+            
             for (Module m : modules) if (m.enabled) m.onUpdate(client);
         });
 
@@ -78,8 +82,10 @@ public class HitX implements ClientModInitializer {
         }
         @Override
         public boolean mouseClicked(double mouseX, double mouseY, int button) {
+            MinecraftClient client = MinecraftClient.getInstance();
+            if (client.player == null) return false;
+
             if (mouseX >= 10 && mouseX <= 110 && mouseY >= 10 && mouseY <= 30) {
-                MinecraftClient client = MinecraftClient.getInstance();
                 for (int i = 0; i < 45; i++) client.interactionManager.clickSlot(client.player.currentScreenHandler.syncId, i, 1, SlotActionType.THROW, client.player);
             }
             int y = 50;
@@ -97,18 +103,27 @@ public class HitX implements ClientModInitializer {
     public static class Module {
         public String name; public boolean enabled;
         public Module(String n, boolean e) { name = n; enabled = e; }
+
         public void onUpdate(MinecraftClient client) {
-            if (client.player == null || client.world == null) return;
+            // EN ÖNEMLİ KISIM: Sunucu verileri gelmeden büyü sorgulama
             try {
-                if (name.equals("FastPlace")) ((MinecraftClientAccessor)client).setItemUseCooldown(0);
+                if (name.equals("FastPlace")) {
+                    ((MinecraftClientAccessor)client).setItemUseCooldown(0);
+                }
+                
                 if (name.equals("KBAura")) {
                     ItemStack stack = client.player.getMainHandStack();
-                    var reg = client.world.getRegistryManager().get(RegistryKeys.ENCHANTMENT);
-                    var kb = reg.getEntry(Enchantments.KNOCKBACK).orElse(null);
+                    if (stack.isEmpty()) return;
+
+                    // Büyü listesini güvenli al
+                    var reg = client.world.getRegistryManager().getOrEmpty(RegistryKeys.ENCHANTMENT);
+                    if (reg.isEmpty()) return;
+
+                    var kb = reg.get().getEntry(Enchantments.KNOCKBACK).orElse(null);
                     if (kb != null && EnchantmentHelper.getLevel(kb, stack) > 0) {
                         for (Entity e : client.world.getEntities()) {
                             if (e instanceof LivingEntity && e != client.player && client.player.distanceTo(e) < 4.5) {
-                                if (client.player.getAttackCooldownProgress(0) >= 1) {
+                                if (client.player.getAttackCooldownProgress(0) >= 0.9) {
                                     client.interactionManager.attackEntity(client.player, e);
                                     client.player.swingHand(Hand.MAIN_HAND);
                                 }
