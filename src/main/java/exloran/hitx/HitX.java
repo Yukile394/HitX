@@ -1,5 +1,6 @@
 package com.exloran.hitx;
 
+import com.exloran.hitx.mixin.MinecraftClientAccessor;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
@@ -8,18 +9,17 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.LivingEntity;
+import net.minecraft.enchantment.Enchantment;
 import net.minecraft.enchantment.EnchantmentHelper;
 import net.minecraft.enchantment.Enchantments;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.LivingEntity;
 import net.minecraft.item.ItemStack;
-import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket;
+import net.minecraft.registry.RegistryKeys;
+import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
@@ -29,7 +29,7 @@ public class HitX implements ClientModInitializer {
 
     public static final List<Module> modules = new ArrayList<>();
     private static KeyBinding guiKey;
-    private static KeyBinding kbAuraKey; // Savurma Otosu için tuş
+    private static KeyBinding kbAuraKey;
 
     @Override
     public void onInitializeClient() {
@@ -38,14 +38,16 @@ public class HitX implements ClientModInitializer {
         kbAuraKey = new KeyBinding("Oto Savurma Aç/Kapat", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_V, "HitX");
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            if (client.player == null) return;
+            if (client.player == null || client.world == null) return;
             
             if (guiKey.wasPressed()) client.setScreen(new ClickGUI());
             
-            // Tuş ile modül kontrolü
             if (kbAuraKey.wasPressed()) {
-                getModule("KBAura").toggle();
-                client.player.sendMessage(Text.of("§b[HitX] §fSavurma Modu: " + (getModule("KBAura").isEnabled() ? "§aAÇIK" : "§cKAPALI")), true);
+                Module kbModule = getModule("KBAura");
+                if (kbModule != null) {
+                    kbModule.toggle();
+                    client.player.sendMessage(Text.of("§b[HitX] §fSavurma Modu: " + (kbModule.isEnabled() ? "§aAÇIK" : "§cKAPALI")), true);
+                }
             }
 
             for (Module m : modules) {
@@ -84,11 +86,9 @@ public class HitX implements ClientModInitializer {
 
         @Override
         public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-            // Fotoğraftaki gibi üst köşelere butonlar
-            renderButton(context, 10, 10, 100, 20, "§cENV Boşalt", mouseX, mouseY); // Sol Üst
-            renderButton(context, this.width - 110, 10, 100, 20, "§aTrade Kabul", mouseX, mouseY); // Sağ Üst
+            renderButton(context, 10, 10, 100, 20, "§cENV Boşalt", mouseX, mouseY);
+            renderButton(context, this.width - 110, 10, 100, 20, "§aTrade Kabul", mouseX, mouseY);
 
-            // Orta Menü
             int x = this.width / 2 - 75;
             int y = this.height / 2 - 50;
             context.fill(x, y, x + 150, y + 100, 0xAA000000);
@@ -109,12 +109,10 @@ public class HitX implements ClientModInitializer {
 
         @Override
         public boolean mouseClicked(double mouseX, double mouseY, int button) {
-            // Env Boşalt (Sol Üst)
             if (mouseX >= 10 && mouseX <= 110 && mouseY >= 10 && mouseY <= 30) {
                 dropEverything();
                 return true;
             }
-            // Modül Tıklama
             int x = this.width / 2 - 75;
             int y = this.height / 2 - 15;
             for (int i = 0; i < modules.size(); i++) {
@@ -128,6 +126,7 @@ public class HitX implements ClientModInitializer {
 
         private void dropEverything() {
             MinecraftClient client = MinecraftClient.getInstance();
+            if (client.player == null) return;
             for (int i = 0; i < 45; i++) {
                 client.interactionManager.clickSlot(client.player.currentScreenHandler.syncId, i, 1, SlotActionType.THROW, client.player);
             }
@@ -147,16 +146,22 @@ public class HitX implements ClientModInitializer {
         public void toggle() { this.enabled = !this.enabled; }
 
         public void onUpdate(MinecraftClient client) {
-            // 1. FastPlace (Hızlı Blok Koyma & Trap Kapatma)
+            if (client.player == null || client.world == null) return;
+
+            // 1. FastPlace (Hızlı Blok Koyma)
             if (name.equals("FastPlace")) {
-                client.itemUseCooldown = 0; 
+                ((MinecraftClientAccessor) client).setItemUseCooldown(0);
             }
 
-            // 2. KBAura (Savurma Otosu)
+            // 2. KBAura (Savurma Otosu - Yeni sürüme uygun)
             if (name.equals("KBAura")) {
                 ItemStack stack = client.player.getMainHandStack();
-                // Elindeki eşyada Savurma (Knockback) varsa çalışır
-                if (EnchantmentHelper.getLevel(Enchantments.KNOCKBACK, stack) > 0) {
+                
+                var registryManager = client.world.getRegistryManager();
+                var enchantmentRegistry = registryManager.get(RegistryKeys.ENCHANTMENT);
+                var knockbackEntry = enchantmentRegistry.getEntry(Enchantments.KNOCKBACK).orElse(null);
+
+                if (knockbackEntry != null && EnchantmentHelper.getLevel(knockbackEntry, stack) > 0) {
                     for (Entity target : client.world.getEntities()) {
                         if (target instanceof LivingEntity && target != client.player && client.player.distanceTo(target) < 4.5) {
                             if (client.player.getAttackCooldownProgress(0.5f) >= 1) {
@@ -168,9 +173,8 @@ public class HitX implements ClientModInitializer {
                 }
             }
 
-            // 3. AutoTrade (Gelen istekleri oto kabul)
+            // 3. AutoTrade
             if (name.equals("AutoTrade")) {
-                // Bu kısım sunucu komutuna göre değişir, genelde /trade accept yazdırılır
                 // client.player.networkHandler.sendChatCommand("trade accept");
             }
         }
