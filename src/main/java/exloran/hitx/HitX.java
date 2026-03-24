@@ -1,4 +1,4 @@
-package com.exloran.hitx;
+package exloran.hitx;
 
 import com.exloran.hitx.mixin.MinecraftClientAccessor;
 import net.fabricmc.api.ClientModInitializer;
@@ -15,7 +15,9 @@ import net.minecraft.enchantment.Enchantments;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.item.ItemStack;
+import net.minecraft.registry.Registry;
 import net.minecraft.registry.RegistryKeys;
+import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
@@ -23,6 +25,7 @@ import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 public class HitX implements ClientModInitializer {
     public static final List<Module> modules = new ArrayList<>();
@@ -39,8 +42,7 @@ public class HitX implements ClientModInitializer {
         modules.add(new Module("AutoTrade", false));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            // KRITIK: Sunucuya giris yapilmadiysa hiçbir işlem yapma (Çökmeyi önler)
-            if (client.player == null || client.world == null || client.getNetworkHandler() == null) return;
+            if (client.player == null || client.world == null) return;
 
             if (guiKey.wasPressed()) client.setScreen(new ClickGUI());
             
@@ -105,7 +107,6 @@ public class HitX implements ClientModInitializer {
         public Module(String n, boolean e) { name = n; enabled = e; }
 
         public void onUpdate(MinecraftClient client) {
-            // EN ÖNEMLİ KISIM: Sunucu verileri gelmeden büyü sorgulama
             try {
                 if (name.equals("FastPlace")) {
                     ((MinecraftClientAccessor)client).setItemUseCooldown(0);
@@ -115,12 +116,12 @@ public class HitX implements ClientModInitializer {
                     ItemStack stack = client.player.getMainHandStack();
                     if (stack.isEmpty()) return;
 
-                    // Büyü listesini güvenli al
-                    var reg = client.world.getRegistryManager().getOrEmpty(RegistryKeys.ENCHANTMENT);
-                    if (reg.isEmpty()) return;
+                    // getOptional kullanarak derleme hatasını gideriyoruz
+                    Optional<Registry<Enchantment>> reg = client.world.getRegistryManager().getOptional(RegistryKeys.ENCHANTMENT);
+                    if (!reg.isPresent()) return;
 
-                    var kb = reg.get().getEntry(Enchantments.KNOCKBACK).orElse(null);
-                    if (kb != null && EnchantmentHelper.getLevel(kb, stack) > 0) {
+                    Optional<RegistryEntry.Reference<Enchantment>> kb = reg.get().getEntry(Enchantments.KNOCKBACK);
+                    if (kb.isPresent() && EnchantmentHelper.getLevel(kb.get(), stack) > 0) {
                         for (Entity e : client.world.getEntities()) {
                             if (e instanceof LivingEntity && e != client.player && client.player.distanceTo(e) < 4.5) {
                                 if (client.player.getAttackCooldownProgress(0) >= 0.9) {
