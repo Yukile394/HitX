@@ -9,4 +9,3 @@ public interface MinecraftClientAccessor {
     @Accessor("itemUseCooldown")
     void setItemUseCooldown(int cooldown);
 }
-
