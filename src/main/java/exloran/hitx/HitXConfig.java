@@ -8,23 +8,23 @@ import me.shedaniel.autoconfig.annotation.ConfigEntry;
 public class HitXConfig implements ConfigData {
 
     @ConfigEntry.Category("hud")
-    public int hudXPercent = 78; // Sağ tarafa yaslar (Kırmızı alan)
+    @ConfigEntry.Gui.Tooltip(count = 1)
+    public int hudX = 78; // HUD Yatay Konum (%)
 
     @ConfigEntry.Category("hud")
-    public int hudYPercent = 40; // Orta-üst kısma koyar (Kırmızı alan)
+    @ConfigEntry.Gui.Tooltip(count = 1)
+    public int hudY = 40; // HUD Dikey Konum (%)
 
-    @ConfigEntry.BoundedDiscrete(min = 4, max = 20)
-    public int duration = 8;
+    @ConfigEntry.Category("hud")
+    @ConfigEntry.BoundedDiscrete(min = 50, max = 200)
+    public int hudScale = 100; // HUD Boyutu (%)
 
-    @ConfigEntry.BoundedDiscrete(min = 4, max = 30)
-    public int size = 8;
+    @ConfigEntry.Gui.CollapsibleObject
+    public Visuals visuals = new Visuals();
 
-    @ConfigEntry.ColorPicker
-    public int red = 255;
-    
-    public int green = 255;
-    public int blue = 255;
-
-    @ConfigEntry.BoundedDiscrete(min = 1, max = 3)
-    public int effectLevel = 3;
+    public static class Visuals {
+        @ConfigEntry.ColorPicker
+        public int barColor = 0xFF0000;
+        public boolean sabitBar = true; // Kafada sabit dursun mu?
+    }
 }
