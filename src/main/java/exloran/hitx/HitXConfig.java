@@ -8,12 +8,10 @@ import me.shedaniel.autoconfig.annotation.ConfigEntry;
 public class HitXConfig implements ConfigData {
 
     @ConfigEntry.Category("hud")
-    @ConfigEntry.Gui.Tooltip(count = 1)
-    public int hudXPercent = 75; // %75 sağda (Kırmızı alan)
+    public int hudXPercent = 78; // Sağ tarafa yaslar (Kırmızı alan)
 
     @ConfigEntry.Category("hud")
-    @ConfigEntry.Gui.Tooltip(count = 1)
-    public int hudYPercent = 45; // %45 yukarda (Kırmızı alan)
+    public int hudYPercent = 40; // Orta-üst kısma koyar (Kırmızı alan)
 
     @ConfigEntry.BoundedDiscrete(min = 4, max = 20)
     public int duration = 8;
