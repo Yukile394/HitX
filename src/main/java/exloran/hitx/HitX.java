@@ -1,5 +1,7 @@
 package com.exloran.hitx;
 
+import me.shedaniel.autoconfig.AutoConfig;
+import me.shedaniel.autoconfig.serializer.GsonConfigSerializer;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
@@ -19,9 +21,9 @@ import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.hit.EntityHitResult;
-import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import org.lwjgl.glfw.GLFW;
+
 import java.util.List;
 
 public class HitX implements ClientModInitializer {
@@ -29,9 +31,6 @@ public class HitX implements ClientModInitializer {
     private boolean hudOn = true, tagOn = true;
     private PlayerEntity target = null;
     private float alpha = 0f;
-    private boolean dupeOn = false;
-    private int dupeTimer = 0, dupeStep = 0, dupeCount = 0, dupeMax = 0;
-    private String dupePrice = "1000";
     private boolean rLast = false, nLast = false;
 
     private static final double RANGE = 6.5, DOT = 0.97;
@@ -39,6 +38,9 @@ public class HitX implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
+        
+        // AutoConfig Başlatma
+        AutoConfig.register(HitXConfig.class, GsonConfigSerializer::new);
 
         // GUI
         ScreenEvents.AFTER_INIT.register((client, screen, W, H) -> {
@@ -53,23 +55,6 @@ public class HitX implements ClientModInitializer {
                 int x=W/2-88, y=H/2-83, id=inv.getScreenHandler().syncId;
                 btn(screen,"Zirhi Giy",x-52,y,50,18,b->{for(int i=9;i<45;i++){ItemStack st=inv.getScreenHandler().getSlot(i).getStack();if(isArmor(st))client.interactionManager.clickSlot(id,i,0,SlotActionType.QUICK_MOVE,client.player);}});
                 btn(screen,"Temizle",  x-52,y+20,50,18,b->{for(int i=9;i<45;i++)client.interactionManager.clickSlot(id,i,1,SlotActionType.THROW,client.player);});
-                int ax=x+228, ay=y+60;
-                btn(screen,"-100",ax,   ay,   38,16,b->{dupePrice=String.valueOf(Math.max(1,safeInt(dupePrice,1000)-100));});
-                btn(screen,"+100",ax+40,ay,   38,16,b->{dupePrice=String.valueOf(safeInt(dupePrice,1000)+100);});
-                btn(screen,"x1",  ax,   ay+18,25,14,b->dupeMax=1);
-                btn(screen,"x5",  ax+27,ay+18,25,14,b->dupeMax=5);
-                btn(screen,"x10", ax+54,ay+18,25,14,b->dupeMax=10);
-                btn(screen,"Sonsuz",ax, ay+34,79,14,b->dupeMax=0);
-                btn(screen,dupeOn?"DUR":"DUPE",ax,ay+50,79,18,b->{
-                    if(!dupeOn){dupeOn=true;dupeStep=0;dupeTimer=5;dupeCount=0;client.setScreen(null);client.player.sendMessage(Text.literal("§aDupe basladi §e"+dupePrice+" §7x"+(dupeMax==0?"sonsuz":dupeMax)),true);}
-                    else{dupeOn=false;dupeStep=0;dupeTimer=0;client.player.sendMessage(Text.literal("§cDupe durdu"),true);}
-                });
-                ScreenEvents.afterRender(screen).register((sc,ctx,mx,my,d)->{
-                    ctx.drawText(client.textRenderer,"§6AH SELL DUPE",ax,ay-10,0xFFAA00,true);
-                    ctx.drawText(client.textRenderer,"§fFiyat: §e"+dupePrice,ax,ay-2,0xFFFFFF,false);
-                    ctx.drawText(client.textRenderer,"§7Max: §e"+(dupeMax==0?"sonsuz":dupeMax),ax+40,ay+19,0xFFFFFF,false);
-                    ctx.drawText(client.textRenderer,dupeOn?"§a● CALISIYOR":"§c● DURDU",ax,ay+68,0xFFFFFF,false);
-                });
             }
         });
 
@@ -91,25 +76,6 @@ public class HitX implements ClientModInitializer {
             if (!client.player.hasStatusEffect(StatusEffects.NIGHT_VISION))
                 client.player.addStatusEffect(new StatusEffectInstance(StatusEffects.NIGHT_VISION,400,0,false,false,false));
 
-            if (dupeOn&&client.currentScreen==null) {
-                dupeTimer--;
-                if (dupeTimer<=0) {
-                    if (dupeStep==0) {
-                        ItemStack h=client.player.getMainHandStack();
-                        if (h.isEmpty()){dupeOn=false;client.player.sendMessage(Text.literal("§cElde item yok"),true);}
-                        else{client.player.networkHandler.sendChatCommand("ah sell "+dupePrice);client.player.sendMessage(Text.literal("§7/ah sell "+dupePrice),true);dupeTimer=25;dupeStep=1;}
-                    } else if (dupeStep==1) {
-                        client.player.networkHandler.sendChatCommand("ah cancel");
-                        client.player.sendMessage(Text.literal("§7/ah cancel"),true);
-                        dupeTimer=20;dupeStep=2;
-                    } else {
-                        dupeCount++;
-                        if (dupeMax>0&&dupeCount>=dupeMax){dupeOn=false;client.player.sendMessage(Text.literal("§aDupe bitti: "+dupeCount+" loop"),true);}
-                        else{dupeStep=0;dupeTimer=10;}
-                    }
-                }
-            }
-
             boolean show=false;
             if (client.crosshairTarget instanceof EntityHitResult e&&e.getEntity() instanceof PlayerEntity p&&p.isAlive()){target=p;show=true;}
             if (!show) {
@@ -128,32 +94,44 @@ public class HitX implements ClientModInitializer {
             MinecraftClient mc=MinecraftClient.getInstance();
             if (mc.player==null||mc.options.hudHidden) return;
             int sw=mc.getWindow().getScaledWidth(),sh=mc.getWindow().getScaledHeight();
+            HitXConfig config = AutoConfig.getConfigHolder(HitXConfig.class).getConfig();
 
             ctx.drawText(mc.textRenderer,"§aFPS §f"+mc.getCurrentFps(),5,5,0xFFFFFF,true);
             ctx.drawText(mc.textRenderer,"§7HUD "+(hudOn?"§a":"§c")+"[R]",5,14,0xFFFFFF,false);
             ctx.drawText(mc.textRenderer,"§7Bar "+(tagOn?"§a":"§c")+"[N]",5,23,0xFFFFFF,false);
-            if (dupeOn) ctx.drawText(mc.textRenderer,"§6DUPE §f"+dupePrice+" §7("+dupeCount+"/"+(dupeMax==0?"inf":dupeMax)+")",5,32,0xFFFFFF,true);
 
             if (mc.player.getHealth()<=6f) {
                 String w="!! DUSUK CAN !!";
                 ctx.drawText(mc.textRenderer,w,(sw-mc.textRenderer.getWidth(w))/2,sh/2-30,0xFF2222,true);
             }
 
-            // Oyuncu ustu can bari
+            // Düzeltilmiş Oyuncu Üstü Can Barı
             if (tagOn&&mc.world!=null) {
                 for (PlayerEntity pl:mc.world.getPlayers()) {
                     if (pl==mc.player||!pl.isAlive()) continue;
                     double dist=mc.player.distanceTo(pl);
                     if (dist>RANGE+0.5) continue;
                     float r=Math.max(0f,pl.getHealth()/pl.getMaxHealth());
-                    double[] sc=proj(mc,pl.getPos().add(0,pl.getHeight()+0.25,0),sw,sh);
+                    
+                    // Pozisyonu TickDelta ile yumuşat (Titremeyi önler)
+                    double smoothX = lerp(pl.lastRenderX, pl.getX(), td);
+                    double smoothY = lerp(pl.lastRenderY, pl.getY(), td) + pl.getHeight() + 0.35;
+                    double smoothZ = lerp(pl.lastRenderZ, pl.getZ(), td);
+
+                    double[] sc=proj(mc,new Vec3d(smoothX, smoothY, smoothZ),sw,sh);
                     if (sc==null) continue;
+                    
                     int px=(int)sc[0],py=(int)sc[1],bw=(int)(48*(1.0-dist/(RANGE+1)*0.4)),bh=4;
                     int bx=px-bw/2,fill=Math.max(1,(int)(r*bw)),col=col(r);
+                    
                     ctx.fill(bx-1,py-1,bx+bw+1,py+bh+1,0xAA000000);
                     ctx.fill(bx,py,bx+fill,py+bh,col);
                     ctx.fill(bx,py,bx+fill,py+1,0x33FFFFFF);
-                    if (dist<RANGE){String nm=pl.getName().getString();ctx.drawText(mc.textRenderer,nm,px-mc.textRenderer.getWidth(nm)/2,py-10,0xFFFFFF,true);}
+                    
+                    if (dist<RANGE){
+                        String nm=pl.getName().getString();
+                        ctx.drawText(mc.textRenderer,nm,px-mc.textRenderer.getWidth(nm)/2,py-10,0xFFFFFF,true);
+                    }
                 }
             }
 
@@ -162,7 +140,11 @@ public class HitX implements ClientModInitializer {
             float mhp=target!=null?target.getMaxHealth():20f;
             float r=mhp>0?Math.max(0f,hp/mhp):0f;
             int a=(int)(alpha*255),c=col(r),hpA=(a<<24)|(c&0xFFFFFF);
-            int bW=155,bH=46,rad=5,bX=sw/2-91-bW-4,bY=sh-bH-24;
+            int bW=155,bH=46,rad=5;
+            
+            // Config'den gelen X ve Y yüzdelerine göre pozisyon hesaplama
+            int bX = (sw * config.hudXPercent) / 100 - (bW / 2);
+            int bY = (sh * config.hudYPercent) / 100 - (bH / 2);
 
             ctx.getMatrices().push();
             ctx.getMatrices().translate(bX,bY,200);
@@ -210,13 +192,8 @@ public class HitX implements ClientModInitializer {
     }
 
     private float lerp(float a,float b,float t){return a+(b-a)*t;}
-    private int safeInt(String s,int d){try{return Integer.parseInt(s.trim());}catch(Exception e){return d;}}
+    private double lerp(double a,double b,float t){return a+(b-a)*t;}
     private void btn(Screen sc,String t,int x,int y,int w,int h,ButtonWidget.PressAction a){Screens.getButtons(sc).add(ButtonWidget.builder(Text.literal(t),a).dimensions(x,y,w,h).build());}
     private boolean isTrash(ItemStack s){return s.isOf(Items.ROTTEN_FLESH)||s.isOf(Items.POISONOUS_POTATO)||s.isOf(Items.DIRT)||s.isOf(Items.COBBLESTONE)||s.isOf(Items.GRAVEL)||s.isOf(Items.SAND);}
     private boolean isArmor(ItemStack s){String n=s.getItem().toString().toLowerCase();return n.contains("helmet")||n.contains("chestplate")||n.contains("leggings")||n.contains("boots");}
-
-    public static class Module {
-        String name; boolean enabled;
-        public Module(String name,boolean enabled){this.name=name;this.enabled=enabled;}
-    }
-}
+                        }
