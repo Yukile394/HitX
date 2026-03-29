@@ -18,29 +18,34 @@ import net.minecraft.item.Items;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
+import net.minecraft.util.math.Box;
+
+import java.util.List;
 
 public class HitX implements ClientModInitializer {
+
+    // Hedef oyuncu — Tick'te güncellenir, HUD'da kullanılır
+    private PlayerEntity cachedTarget = null;
 
     @Override
     public void onInitializeClient() {
 
-        // ================= 1. GUI / EKRAN BUTONLARI =================
+        // ================= 1. GUI BUTONLARI =================
         ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
 
-            // --- SANDIK EKRANI ---
             if (screen instanceof GenericContainerScreen container) {
-                int xPos  = (scaledWidth / 2) + 92;
-                int yPos  = (scaledHeight / 2) - 80;
+                int xPos   = (scaledWidth / 2) + 92;
+                int yPos   = (scaledHeight / 2) - 80;
                 int syncId = container.getScreenHandler().syncId;
 
                 addButton(screen, "Herşeyi Al",  xPos, yPos,      85, 20, b -> {
-                    int chestSlots = container.getScreenHandler().getInventory().size();
-                    for (int i = 0; i < chestSlots; i++)
+                    int cs = container.getScreenHandler().getInventory().size();
+                    for (int i = 0; i < cs; i++)
                         client.interactionManager.clickSlot(syncId, i, 0, SlotActionType.QUICK_MOVE, client.player);
                 });
                 addButton(screen, "Herşeyi Koy", xPos, yPos + 24, 85, 20, b -> {
-                    int chestSlots = container.getScreenHandler().getInventory().size();
-                    for (int i = chestSlots; i < chestSlots + 36; i++)
+                    int cs = container.getScreenHandler().getInventory().size();
+                    for (int i = cs; i < cs + 36; i++)
                         client.interactionManager.clickSlot(syncId, i, 0, SlotActionType.QUICK_MOVE, client.player);
                 });
                 addButton(screen, "Herşeyi At",  xPos, yPos + 48, 85, 20, b -> {
@@ -56,50 +61,77 @@ public class HitX implements ClientModInitializer {
                 });
             }
 
-            // --- ENVANTER EKRANI ---
             if (screen instanceof InventoryScreen inv) {
                 int x      = (scaledWidth - 176) / 2;
                 int y      = (scaledHeight - 166) / 2;
                 int syncId = inv.getScreenHandler().syncId;
 
-                addButton(screen, "🛡", x - 25,   y,       20, 20, b -> {
+                addButton(screen, "🛡", x - 25,  y,       20, 20, b -> {
                     for (int i = 9; i < 45; i++) {
                         ItemStack stack = inv.getScreenHandler().getSlot(i).getStack();
                         if (isArmor(stack))
                             client.interactionManager.clickSlot(syncId, i, 0, SlotActionType.QUICK_MOVE, client.player);
                     }
                 });
-                addButton(screen, "⚙", x + 181,  y,       20, 20, b -> {
+                addButton(screen, "⚙", x + 181, y,       20, 20, b -> {
                     if (client.player != null)
                         client.player.sendMessage(Text.literal("§eSıralama Modu Aktif!"), true);
                 });
-                addButton(screen, "🗑", x - 25,   y + 145, 20, 20, b -> {
+                addButton(screen, "🗑", x - 25,  y + 145, 20, 20, b -> {
                     for (int i = 9; i < 45; i++)
                         client.interactionManager.clickSlot(syncId, i, 1, SlotActionType.THROW, client.player);
                 });
-                addButton(screen, "H",  x + 181,  y + 145, 20, 20, b -> {
+                addButton(screen, "H",  x + 181, y + 145, 20, 20, b -> {
                     for (int i = 36; i < 45; i++)
                         client.interactionManager.clickSlot(syncId, i, 1, SlotActionType.THROW, client.player);
                 });
             }
         });
 
-        // ================= 2. PVP ÖZELLİKLERİ =================
+        // ================= 2. PVP + HEDEF CACHE =================
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            if (client.player != null) {
-                // Auto-Sprint
-                if (client.options.forwardKey.isPressed()
-                        && !client.player.horizontalCollision
-                        && !client.player.isSneaking()
-                        && client.player.getHungerManager().getFoodLevel() > 6) {
-                    client.player.setSprinting(true);
-                }
-                // Fullbright (parçacıksız, gösterimsiz)
-                if (!client.player.hasStatusEffect(StatusEffects.NIGHT_VISION)) {
-                    client.player.addStatusEffect(
-                        new StatusEffectInstance(StatusEffects.NIGHT_VISION, 400, 0, false, false, false)
-                    );
-                }
+            if (client.player == null || client.world == null) return;
+
+            // Auto-Sprint
+            if (client.options.forwardKey.isPressed()
+                    && !client.player.horizontalCollision
+                    && !client.player.isSneaking()
+                    && client.player.getHungerManager().getFoodLevel() > 6) {
+                client.player.setSprinting(true);
+            }
+
+            // Fullbright
+            if (!client.player.hasStatusEffect(StatusEffects.NIGHT_VISION)) {
+                client.player.addStatusEffect(
+                    new StatusEffectInstance(StatusEffects.NIGHT_VISION, 400, 0, false, false, false)
+                );
+            }
+
+            // ── Hedef Güncelleme ──
+            // Önce crosshair'e bak (vanilla targetedEntity)
+            if (client.targetedEntity instanceof PlayerEntity p) {
+                cachedTarget = p;
+                return;
+            }
+
+            // Crosshair'de yoksa: 16 blok içindeki en yakın PlayerEntity'yi al
+            Box searchBox = client.player.getBoundingBox().expand(16.0);
+            List<PlayerEntity> nearby = client.world.getEntitiesByClass(
+                PlayerEntity.class,
+                searchBox,
+                e -> e != client.player && e.isAlive()
+            );
+
+            if (!nearby.isEmpty()) {
+                // En yakınını bul
+                cachedTarget = nearby.stream()
+                    .min((a, b) -> Double.compare(
+                        a.squaredDistanceTo(client.player),
+                        b.squaredDistanceTo(client.player)
+                    ))
+                    .orElse(null);
+            } else {
+                cachedTarget = null;
             }
         });
 
@@ -111,10 +143,10 @@ public class HitX implements ClientModInitializer {
             int sw = client.getWindow().getScaledWidth();
             int sh = client.getWindow().getScaledHeight();
 
-            // ── FPS (Sol Üst) ──
+            // ── FPS ──
             drawContext.drawText(client.textRenderer, "FPS: " + client.getCurrentFps(), 5, 5, 0x00FF00, true);
 
-            // ── Düşük Can Uyarısı (Ortada) ──
+            // ── Düşük Can Uyarısı ──
             if (client.player.getHealth() <= 6.0f) {
                 String warn = "⚠ DÜŞÜK CAN ⚠";
                 int tw = client.textRenderer.getWidth(warn);
@@ -122,22 +154,21 @@ public class HitX implements ClientModInitializer {
                     (sw / 2) - (tw / 2), (sh / 2) - 30, 0xFF0000, true);
             }
 
-            // ─────────────────────────────────────────────────────────────────
-            // TARGET HUD — Pojav tarzı
-            // Konum: Sağ taraf, dikey ortanın biraz yukarısı
-            // ─────────────────────────────────────────────────────────────────
-            if (client.targetedEntity instanceof PlayerEntity target) {
+            // ─────────────────────────────────────────────────────────────
+            // TARGET HUD — Pojav tarzı, sağ orta
+            // ─────────────────────────────────────────────────────────────
+            PlayerEntity target = cachedTarget;
+            if (target != null && target.isAlive()) {
 
                 float health    = target.getHealth();
                 float maxHealth = target.getMaxHealth();
-                int   hpInt     = (int) health; // Sağ köşede gösterilecek sayı
+                int   hpInt     = (int) Math.ceil(health);
 
-                // Kutu boyutları
                 int boxW = 130;
                 int boxH = 36;
-                int r    = 5; // köşe yuvarlaklığı (fill simülasyonu)
+                int rad  = 5;
 
-                // Konum: sağ kenardan 12px içeride, dikey ortanın ~20px yukarısında
+                // Sağ taraf, dikey ortanın biraz yukarısı
                 int boxX = sw - boxW - 12;
                 int boxY = (sh / 2) - boxH / 2 - 20;
 
@@ -148,24 +179,22 @@ public class HitX implements ClientModInitializer {
                 drawContext.getMatrices().push();
                 drawContext.getMatrices().translate(boxX, boxY, 0);
 
-                // ── Yuvarlak köşeli siyah arka plan ──
-                // Yatay şerit (tam genişlik, r kadar kısaltılmış yükseklik)
-                drawContext.fill(r, 0,       boxW - r, boxH,     0xEE111111);
-                // Dikey şerit (tam yükseklik, r kadar kısaltılmış genişlik)
-                drawContext.fill(0, r,       boxW,     boxH - r, 0xEE111111);
+                // ── Yuvarlak köşeli arka plan ──
+                drawContext.fill(rad, 0,    boxW - rad, boxH,      0xEE111111);
+                drawContext.fill(0,   rad,  boxW,       boxH - rad, 0xEE111111);
 
-                // ── Oyuncu kafası (skin texture, 14x14) ──
-                Identifier skin = client.getSkinProvider().getSkinTextures(
-                    target.getGameProfile()
-                ).texture();
-                int headX = 6;
-                int headY = (boxH - 14) / 2;
-                // Kafa layer 1
-                drawContext.drawTexture(skin, headX, headY, 14, 14, 8, 8, 8, 8, 64, 64);
-                // Kafa overlay (şapka katmanı)
-                drawContext.drawTexture(skin, headX, headY, 14, 14, 40, 8, 8, 8, 64, 64);
+                // ── Oyuncu kafası (skin, 14x14) ──
+                try {
+                    Identifier skin = client.getSkinProvider()
+                        .getSkinTextures(target.getGameProfile()).texture();
+                    int hx = 6, hy = (boxH - 14) / 2;
+                    drawContext.drawTexture(skin, hx, hy, 14, 14, 8,  8, 8, 8, 64, 64);
+                    drawContext.drawTexture(skin, hx, hy, 14, 14, 40, 8, 8, 8, 64, 64);
+                } catch (Exception ignored) {
+                    // Skin yüklenmediyse boş bırak
+                }
 
-                // ── Oyuncu adı (beyaz, kalın gölge) ──
+                // ── İsim ──
                 String name = target.getName().getString();
                 drawContext.drawText(client.textRenderer, name, 25, 5, 0xFFFFFF, true);
 
@@ -175,19 +204,18 @@ public class HitX implements ClientModInitializer {
                 drawContext.drawText(client.textRenderer, hpStr,
                     boxW - hpW - 5, 5, 0xFF000000 | barColor, true);
 
-                // ── Can barı (altta, animasyonlu) ──
-                int barX    = 25;
-                int barY    = 25;
-                int barW    = boxW - barX - 6;
-                int barH    = 5;
-                int filled  = Math.max(1, (int) ((health / maxHealth) * barW));
+                // ── Can barı ──
+                int barX   = 25;
+                int barY   = 25;
+                int barW   = boxW - barX - 6;
+                int barH   = 5;
+                int filled = Math.max(1, (int) ((health / maxHealth) * barW));
 
                 // Arka plan
                 drawContext.fill(barX, barY, barX + barW, barY + barH, 0xFF2A2A2A);
-                // Dolu kısım — animasyonlu renk
+                // Dolu (animasyonlu renk)
                 drawContext.fill(barX, barY, barX + filled, barY + barH, 0xFF000000 | barColor);
-
-                // ── Kısa parlaklık efekti (bar üstüne ince beyaz şerit) ──
+                // Parlaklık şeridi (üst ince beyaz)
                 drawContext.fill(barX, barY, barX + filled, barY + 1, 0x55FFFFFF);
 
                 drawContext.getMatrices().pop();
@@ -195,35 +223,26 @@ public class HitX implements ClientModInitializer {
         });
     }
 
-    // ─────────────────────────────────────────────────────────
-    // Sarı (FF FF 00) → Pembe (FF 80 C0) → Beyaz (FF FF FF) → Sarı
-    // ─────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────
+    // Sarı → Pembe → Beyaz → Sarı animasyonu
+    // ─────────────────────────────────────────
     private int animatedBarColor(float t) {
         float r, g, b;
         if (t < 0.33f) {
             float p = t / 0.33f;
-            r = 1.0f;
-            g = lerp(1.0f, 0.50f, p);
-            b = lerp(0.0f, 0.75f, p);
+            r = 1.0f; g = lerp(1.0f, 0.50f, p); b = lerp(0.0f, 0.75f, p);
         } else if (t < 0.66f) {
             float p = (t - 0.33f) / 0.33f;
-            r = 1.0f;
-            g = lerp(0.50f, 1.0f, p);
-            b = lerp(0.75f, 1.0f, p);
+            r = 1.0f; g = lerp(0.50f, 1.0f, p); b = lerp(0.75f, 1.0f, p);
         } else {
             float p = (t - 0.66f) / 0.34f;
-            r = 1.0f;
-            g = lerp(1.0f, 1.0f, p); // beyazdan sarıya geri dönerken g sabit
-            b = lerp(1.0f, 0.0f, p);
+            r = 1.0f; g = 1.0f; b = lerp(1.0f, 0.0f, p);
         }
         return ((int)(r * 255) << 16) | ((int)(g * 255) << 8) | (int)(b * 255);
     }
 
     private float lerp(float a, float b, float t) { return a + (b - a) * t; }
 
-    // ─────────────────────────────────────────────────────────
-    // YARDIMCI METOTLAR
-    // ─────────────────────────────────────────────────────────
     private void addButton(Screen screen, String text, int x, int y, int w, int h,
                            ButtonWidget.PressAction action) {
         Screens.getButtons(screen).add(
@@ -244,11 +263,7 @@ public class HitX implements ClientModInitializer {
     }
 
     public static class Module {
-        String  name;
-        boolean enabled;
-        public Module(String name, boolean enabled) {
-            this.name    = name;
-            this.enabled = enabled;
-        }
+        String name; boolean enabled;
+        public Module(String name, boolean enabled) { this.name = name; this.enabled = enabled; }
     }
-            }
+}
