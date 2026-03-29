@@ -18,6 +18,7 @@ import net.minecraft.item.Items;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
+import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 
@@ -25,15 +26,15 @@ import java.util.List;
 
 public class HitX implements ClientModInitializer {
 
-    private PlayerEntity cachedTarget  = null;
-
-    // Fade animasyonu için alpha (0.0 = tamamen gizli, 1.0 = tam görünür)
+    private PlayerEntity cachedTarget = null;
     private float hudAlpha = 0.0f;
 
-    // HUD'un ne zaman gösterileceği:
-    // Oyuncunun hitbox'ına girince (mesafe < HIT_RANGE) VE bakıyorken
-    private static final double HIT_RANGE   = 4.5;  // Blok — vanilla PvP menzili
-    private static final float  FADE_SPEED  = 0.08f; // Fade hızı (0.0→1.0 adım)
+    // Sadece oyuncunun hitbox'ına bakarken göster
+    // crosshair tam hitbox'a değiyorsa = targetedEntity PlayerEntity
+    // yoksa 6 blok içinde ve crosshair ±15° içindeyse göster
+    private static final double SHOW_RANGE  = 6.0;
+    private static final double DOT_THRESH  = 0.97; // ~14° — çok dar, yere bakınca tetiklenmez
+    private static final float  FADE_SPEED  = 0.10f;
 
     @Override
     public void onInitializeClient() {
@@ -96,7 +97,7 @@ public class HitX implements ClientModInitializer {
             }
         });
 
-        // ================= 2. PVP + HEDEF + FADE =================
+        // ================= 2. PVP + HEDEF =================
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.player == null || client.world == null) return;
 
@@ -104,73 +105,70 @@ public class HitX implements ClientModInitializer {
             if (client.options.forwardKey.isPressed()
                     && !client.player.horizontalCollision
                     && !client.player.isSneaking()
-                    && client.player.getHungerManager().getFoodLevel() > 6) {
+                    && client.player.getHungerManager().getFoodLevel() > 6)
                 client.player.setSprinting(true);
-            }
 
             // Fullbright
-            if (!client.player.hasStatusEffect(StatusEffects.NIGHT_VISION)) {
+            if (!client.player.hasStatusEffect(StatusEffects.NIGHT_VISION))
                 client.player.addStatusEffect(
-                    new StatusEffectInstance(StatusEffects.NIGHT_VISION, 400, 0, false, false, false)
-                );
-            }
+                    new StatusEffectInstance(StatusEffects.NIGHT_VISION, 400, 0, false, false, false));
 
-            // ── Hedef & Koşul Kontrolü ──
+            // ── Hedef Tespiti ──
             boolean shouldShow = false;
 
-            // 1) Crosshair'de bir oyuncu var mı?
-            if (client.targetedEntity instanceof PlayerEntity p && p.isAlive()) {
-                double dist = client.player.distanceTo(p);
-                if (dist <= HIT_RANGE) {
-                    cachedTarget = p;
+            // Yöntem 1: Crosshair TAM olarak bir PlayerEntity'ye değiyor (en güvenilir)
+            if (client.crosshairTarget instanceof EntityHitResult ehr
+                    && ehr.getEntity() instanceof PlayerEntity p
+                    && p.isAlive()) {
+                cachedTarget = p;
+                shouldShow   = true;
+            }
+
+            // Yöntem 2: Crosshair başka bir şeye değiyor ama yakında oyuncu var
+            // Bu durumda çok dar açı (DOT_THRESH = 0.97 ≈ 14°) ve mesafe kontrolü yap
+            if (!shouldShow) {
+                Vec3d eyePos = client.player.getCameraPosVec(1.0f);
+                Vec3d look   = client.player.getRotationVec(1.0f).normalize();
+
+                Box searchBox = client.player.getBoundingBox().expand(SHOW_RANGE);
+                List<PlayerEntity> nearby = client.world.getEntitiesByClass(
+                    PlayerEntity.class, searchBox,
+                    e -> e != client.player && e.isAlive()
+                );
+
+                PlayerEntity best     = null;
+                double       bestDot  = DOT_THRESH; // Eşiğin altındakiler kabul edilmez
+
+                for (PlayerEntity candidate : nearby) {
+                    // Oyuncunun hitbox merkezine bak (göz seviyesi)
+                    Vec3d targetCenter = candidate.getCameraPosVec(1.0f);
+                    Vec3d dir = targetCenter.subtract(eyePos).normalize();
+                    double dot = look.dotProduct(dir);
+
+                    if (dot > bestDot) {
+                        bestDot = dot;
+                        best    = candidate;
+                    }
+                }
+
+                if (best != null) {
+                    cachedTarget = best;
                     shouldShow   = true;
                 }
             }
 
-            // 2) Crosshair'de yoksa — hitbox menzilinde (HIT_RANGE) biri var mı?
-            if (!shouldShow) {
-                Box box = client.player.getBoundingBox().expand(HIT_RANGE);
-                List<PlayerEntity> nearby = client.world.getEntitiesByClass(
-                    PlayerEntity.class, box,
-                    e -> e != client.player && e.isAlive()
-                );
-
-                // En yakını al ve bakış açısını kontrol et
-                PlayerEntity closest = nearby.isEmpty() ? null : nearby.stream()
-                    .min((a, b) -> Double.compare(
-                        a.squaredDistanceTo(client.player),
-                        b.squaredDistanceTo(client.player)))
-                    .orElse(null);
-
-                if (closest != null) {
-                    // Bakış yönü kontrolü: oyuncunun bakış vektörü ile hedef yönü arasındaki açı < 90°
-                    Vec3d look  = client.player.getRotationVec(1.0f).normalize();
-                    Vec3d toTgt = closest.getPos().subtract(client.player.getPos()).normalize();
-                    double dot  = look.dotProduct(toTgt); // 1.0 = tam karşı, 0.0 = 90°
-
-                    if (dot > 0.0) { // Hedefe doğru bakıyorsa (herhangi bir açıda önde)
-                        cachedTarget = closest;
-                        shouldShow   = true;
-                    }
-                }
-            }
-
-            // Hedef yoksa veya koşul sağlanmıyorsa cache'i temizle
             if (!shouldShow) cachedTarget = null;
 
-            // ── Smooth Fade ──
-            if (shouldShow) {
-                hudAlpha = Math.min(1.0f, hudAlpha + FADE_SPEED);
-            } else {
-                hudAlpha = Math.max(0.0f, hudAlpha - FADE_SPEED);
-            }
+            // Smooth fade
+            hudAlpha = shouldShow
+                ? Math.min(1.0f, hudAlpha + FADE_SPEED)
+                : Math.max(0.0f, hudAlpha - FADE_SPEED);
         });
 
         // ================= 3. HUD =================
         HudRenderCallback.EVENT.register((drawContext, tickDelta) -> {
             MinecraftClient client = MinecraftClient.getInstance();
             if (client.player == null || client.options.hudHidden) return;
-            if (hudAlpha <= 0.01f) return; // Tamamen gizliyse hiç çizme
 
             int sw = client.getWindow().getScaledWidth();
             int sh = client.getWindow().getScaledHeight();
@@ -187,111 +185,103 @@ public class HitX implements ClientModInitializer {
                     (sw / 2) - (tw / 2), (sh / 2) - 30, 0xFF0000, true);
             }
 
-            // ─────────────────────────────────────────────────────────────
-            // TARGET HUD — Sol Alt, Sade Tasarım, Fade Animasyonlu
-            // ─────────────────────────────────────────────────────────────
+            // Fade yoksa çizme
+            if (hudAlpha <= 0.01f) return;
+
             PlayerEntity target = cachedTarget;
-            if (target == null && hudAlpha <= 0.01f) return;
-
-            // Alpha değerini 0-255 arasına çevir
-            int a = (int)(hudAlpha * 255);
-
-            // ── Sabit, göz yormayan renkler ──
-            // Arka plan: koyu siyah (alpha ile)
-            int bgColor   = (Math.min(a, 238) << 24) | 0x0D0D0D;
-            // Üst çizgi: sakin mavi-beyaz
-            int accentColor = (a << 24) | 0x88BBFF;
-            // Can barı: sağlık durumuna göre (yeşil → sarı → kırmızı), sade
-            // İsim: beyaz
-            int nameColor = (a << 24) | 0xFFFFFF;
-            // Alt yazı rengi
-            int subColor  = (a << 24) | 0xAAAAAA;
-
             float health    = (target != null) ? target.getHealth()    : 0f;
             float maxHealth = (target != null) ? target.getMaxHealth() : 20f;
             int   hpInt     = (int) Math.ceil(health);
-            float hpRatio   = (maxHealth > 0) ? (health / maxHealth) : 0f;
+            float hpRatio   = (maxHealth > 0) ? Math.max(0f, health / maxHealth) : 0f;
 
-            // Can rengi — sade, göz yormaz
+            int alpha = (int)(hudAlpha * 255);
+
+            // ── Can rengine göre bar rengi (yeşil → sarı → kırmızı) ──
             int hpR, hpG;
             if (hpRatio > 0.5f) {
-                // Yeşil → Sarı
                 float t = (hpRatio - 0.5f) / 0.5f;
-                hpR = (int)(lerp(255f, 80f,  t));
-                hpG = (int)(lerp(220f, 210f, t));
+                hpR = (int) lerp(255f, 80f,  t);
+                hpG = (int) lerp(200f, 210f, t);
             } else {
-                // Sarı → Kırmızı
                 float t = hpRatio / 0.5f;
                 hpR = 220;
-                hpG = (int)(lerp(0f, 220f, t));
+                hpG = (int) lerp(30f, 200f, t);
             }
-            int hpBarColor = (a << 24) | (hpR << 16) | (hpG << 8) | 0x44;
+            int hpBarColor  = (alpha << 24) | (hpR << 16) | (hpG << 8) | 0x44;
+            int hpTextColor = (alpha << 24) | (hpR << 16) | (hpG << 8) | 0x44;
 
-            // Kutu
-            int boxW = 140;
-            int boxH = 42;
+            // ── Kutu boyutları — orta boyut ──
+            int boxW = 155;
+            int boxH = 46;
             int rad  = 5;
 
-            // Sol alt — hotbar üstü
-            int boxX = 8;
-            int boxY = sh - boxH - 24;
+            // ── Konum: Kırmızı can göstergesinin (vanilla heart HUD) yanına ──
+            // Vanilla can barı: ekranın ortasından solda, hotbar'ın hemen üstü
+            // sh - 39 civarında başlar. Biz onun soluna koyuyoruz.
+            int hotbarY  = sh - 22;          // hotbar'ın üst kenarı yaklaşık
+            int boxX     = (sw / 2) - 91 - boxW - 4;  // can barının hemen solunda
+            int boxY     = hotbarY - boxH - 2;
 
             drawContext.getMatrices().push();
             drawContext.getMatrices().translate(boxX, boxY, 200);
 
-            // Arka plan
+            // Arka plan (yuvarlak köşeli)
+            int bgColor = (Math.min(alpha, 230) << 24) | 0x0A0A0A;
             drawContext.fill(rad, 0,   boxW - rad, boxH,       bgColor);
             drawContext.fill(0,   rad, boxW,       boxH - rad, bgColor);
 
-            // Üst aksent çizgisi (sakin mavi-beyaz)
-            drawContext.fill(rad, 0, boxW - rad, 2, accentColor);
+            // Üst aksent çizgisi — can rengine göre dinamik
+            drawContext.fill(rad, 0, boxW - rad, 2, hpBarColor);
 
-            // Oyuncu kafası
+            // ── Oyuncu kafası (20x20) ──
             if (target != null) {
                 try {
                     Identifier skin = client.getSkinProvider()
                         .getSkinTextures(target.getGameProfile()).texture();
-                    drawContext.fill(5, 6, 23, 24, (Math.min(a, 80) << 24) | 0x000000);
-                    drawContext.drawTexture(skin, 5, 6, 18, 18, 8,  8, 8, 8, 64, 64);
-                    drawContext.drawTexture(skin, 5, 6, 18, 18, 40, 8, 8, 8, 64, 64);
+                    int hx = 6, hy = (boxH - 20) / 2;
+                    // Kafa gölgesi
+                    drawContext.fill(hx - 1, hy - 1, hx + 21, hy + 21,
+                        (Math.min(alpha, 100) << 24) | 0x000000);
+                    // Kafa layer 1
+                    drawContext.drawTexture(skin, hx, hy, 20, 20, 8,  8, 8, 8, 64, 64);
+                    // Kafa overlay (şapka)
+                    drawContext.drawTexture(skin, hx, hy, 20, 20, 40, 8, 8, 8, 64, 64);
                 } catch (Exception ignored) {}
             }
 
-            // "TARGET" etiketi + isim
-            drawContext.drawText(client.textRenderer, "TARGET", 27, 4,  subColor,  false);
-            String name = (target != null) ? target.getName().getString() : "...";
-            drawContext.drawText(client.textRenderer, name,     27, 13, nameColor, true);
+            int textX = 32;
 
-            // Can sayısı (sağda)
+            // ── "TARGET" etiketi ──
+            int subAlpha = Math.min(alpha, 180);
+            drawContext.drawText(client.textRenderer, "TARGET",
+                textX, 4, (subAlpha << 24) | 0x88BBFF, false);
+
+            // ── Oyuncu adı ──
+            String name = (target != null) ? target.getName().getString() : "---";
+            drawContext.drawText(client.textRenderer, name,
+                textX, 13, (alpha << 24) | 0xFFFFFF, true);
+
+            // ── Can sayısı (sağda, can rengiyle) ──
             String hpStr = hpInt + " ❤";
             int hpW = client.textRenderer.getWidth(hpStr);
             drawContext.drawText(client.textRenderer, hpStr,
-                boxW - hpW - 6, 13, hpBarColor | 0xFF000000 & ((a << 24) | 0xFFFFFF), true);
-            // Daha güvenli can rengi yazısı
-            int hpTextColor = (a << 24) | (hpR << 16) | (hpG << 8) | 0x44;
-            drawContext.drawText(client.textRenderer, hpStr, boxW - hpW - 6, 13, hpTextColor, true);
+                boxW - hpW - 6, 13, hpTextColor, true);
 
-            // Can barı
-            int barX   = 27;
-            int barY   = 28;
+            // ── Can barı ──
+            int barX   = textX;
+            int barY   = 29;
             int barW   = boxW - barX - 6;
-            int barH   = 6;
+            int barH   = 7;
             int filled = Math.max(1, (int)(hpRatio * barW));
 
-            int barBg  = (Math.min(a, 200) << 24) | 0x1E1E1E;
-            drawContext.fill(barX, barY, barX + barW, barY + barH, barBg);
+            // Arka plan
+            drawContext.fill(barX, barY, barX + barW, barY + barH,
+                (Math.min(alpha, 200) << 24) | 0x1A1A1A);
+            // Dolu kısım
             drawContext.fill(barX, barY, barX + filled, barY + barH, hpBarColor);
             // İnce parlaklık
-            int shine = (Math.min(a / 3, 60) << 24) | 0xFFFFFF;
-            drawContext.fill(barX, barY, barX + filled, barY + 2, shine);
-
-            // Yüzde
-            String pct = (int)(hpRatio * 100) + "%";
-            int pctW = client.textRenderer.getWidth(pct);
-            if (filled > pctW + 4) {
-                drawContext.drawText(client.textRenderer, pct,
-                    barX + filled - pctW - 2, barY - 1, subColor, false);
-            }
+            drawContext.fill(barX, barY, barX + filled, barY + 2,
+                (Math.min(alpha / 4, 50) << 24) | 0xFFFFFF);
 
             drawContext.getMatrices().pop();
         });
