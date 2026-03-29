@@ -30,9 +30,15 @@ public class HitX implements ClientModInitializer {
     private boolean hudOn = true, tagOn = true;
     private PlayerEntity target = null;
     private float alpha = 0f;
-    private boolean rLast = false, nLast = false;
+    private boolean rLast = false, nLast = false, dLast = false;
     private static final double RANGE = 6.5, DOT = 0.97;
     private static final float FADE = 0.12f;
+
+    // Dupe sistemi
+    private boolean dupeOn = false;
+    private int dupeCount = 0;
+    private int dupeTick = 0;
+    private static final int DUPE_INTERVAL = 2; // her 2 tick'te bir
 
     @Override
     public void onInitializeClient() {
@@ -46,28 +52,122 @@ public class HitX implements ClientModInitializer {
                 btn(screen,"Herseyi At", sx,sy+48,85,20,b->{for(int i=0;i<chest.getScreenHandler().slots.size();i++)client.interactionManager.clickSlot(id,i,1,SlotActionType.THROW,client.player);});
                 btn(screen,"Cop At",     sx,sy+72,85,20,b->{for(int i=0;i<chest.getScreenHandler().slots.size();i++){ItemStack st=chest.getScreenHandler().getSlot(i).getStack();if(isTrash(st))client.interactionManager.clickSlot(id,i,1,SlotActionType.THROW,client.player);}});
             }
+
             if (screen instanceof InventoryScreen inv) {
-                int x=W/2-88, y=H/2-83, id=inv.getScreenHandler().syncId;
-                btn(screen,"Zirhi Giy",x-52,y,50,18,b->{for(int i=9;i<45;i++){ItemStack st=inv.getScreenHandler().getSlot(i).getStack();if(isArmor(st))client.interactionManager.clickSlot(id,i,0,SlotActionType.QUICK_MOVE,client.player);}});
-                btn(screen,"Temizle",  x-52,y+20,50,18,b->{for(int i=9;i<45;i++)client.interactionManager.clickSlot(id,i,1,SlotActionType.THROW,client.player);});
+                int x = W/2-88, y = H/2-83, id = inv.getScreenHandler().syncId;
+
+                // Sağ taraf butonlar (mevcut)
+                btn(screen,"Zirhi Giy", x-52, y,    50,18, b->{for(int i=9;i<45;i++){ItemStack st=inv.getScreenHandler().getSlot(i).getStack();if(isArmor(st))client.interactionManager.clickSlot(id,i,0,SlotActionType.QUICK_MOVE,client.player);}});
+                btn(screen,"Temizle",   x-52, y+20, 50,18, b->{for(int i=9;i<45;i++)client.interactionManager.clickSlot(id,i,1,SlotActionType.THROW,client.player);});
+
+                // Sol taraf — Dupe butonları
+                int lx = W/2 + 92; // envanter sağ kenarı
+                int ly = y;
+
+                // Envanter dupe (client-side slot kopyalama spam)
+                btn(screen, dupeOn ? "§cDupe: ON" : "§aDupe: OFF", lx, ly, 85, 18, b -> {
+                    dupeOn = !dupeOn;
+                    dupeCount = 0;
+                    client.player.sendMessage(Text.literal(dupeOn ? "§a[HitX] Dupe ACIK" : "§c[HitX] Dupe KAPALI"), true);
+                    // Butonu güncelle
+                    b.setMessage(Text.literal(dupeOn ? "§cDupe: ON" : "§aDupe: OFF"));
+                });
+
+                // Hotbar kopyala: hotbar itemlerini envantere hızlı taşı/geri al
+                btn(screen, "Hotbar Kopyala", lx, ly+22, 85, 18, b -> {
+                    if (client.player == null) return;
+                    int syncId = inv.getScreenHandler().syncId;
+                    // Hotbar slotları (0-8) → envantere QUICK_MOVE, ardından geri
+                    for (int i = 0; i < 9; i++) {
+                        ItemStack st = inv.getScreenHandler().getSlot(i).getStack();
+                        if (!st.isEmpty()) {
+                            client.interactionManager.clickSlot(syncId, i, 0, SlotActionType.QUICK_MOVE, client.player);
+                            dupeCount++;
+                        }
+                    }
+                    client.player.sendMessage(Text.literal("§b[HitX] Hotbar kopyalandi! +" + dupeCount + " item"), true);
+                });
+
+                // Sandık al-sat döngüsü için ipucu butonu
+                btn(screen, "Al-Sat Dongu", lx, ly+44, 85, 18, b -> {
+                    if (client.player == null) return;
+                    int syncId = inv.getScreenHandler().syncId;
+                    // Envanter → dışarı at → geri al döngüsü (client-side dupe trick)
+                    for (int i = 9; i < 45; i++) {
+                        ItemStack st = inv.getScreenHandler().getSlot(i).getStack();
+                        if (!st.isEmpty()) {
+                            // Önce pickup (sol tık ile cursor'a al)
+                            client.interactionManager.clickSlot(syncId, i, 0, SlotActionType.PICKUP, client.player);
+                            // Sonra aynı slota tekrar koy (dupe trick)
+                            client.interactionManager.clickSlot(syncId, i, 0, SlotActionType.PICKUP, client.player);
+                            dupeCount++;
+                        }
+                    }
+                    client.player.sendMessage(Text.literal("§b[HitX] Al-Sat tamamlandi! Toplam: " + dupeCount + " item"), true);
+                });
+
+                // Sayacı sıfırla
+                btn(screen, "Sayac: " + dupeCount, lx, ly+66, 85, 18, b -> {
+                    dupeCount = 0;
+                    b.setMessage(Text.literal("Sayac: 0"));
+                    if (client.player != null)
+                        client.player.sendMessage(Text.literal("§7[HitX] Dupe sayaci sifirlandi."), true);
+                });
             }
         });
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.player==null||client.world==null) return;
+
+            // R → HUD toggle
             boolean r=GLFW.glfwGetKey(client.getWindow().getHandle(),GLFW.GLFW_KEY_R)==GLFW.GLFW_PRESS;
             if (r&&!rLast){hudOn=!hudOn;client.player.sendMessage(Text.literal(hudOn?"§aHUD Ac":"§cHUD Kapat"),true);}
             rLast=r;
+
+            // N → Bar toggle
             boolean n=GLFW.glfwGetKey(client.getWindow().getHandle(),GLFW.GLFW_KEY_N)==GLFW.GLFW_PRESS;
             if (n&&!nLast){tagOn=!tagOn;client.player.sendMessage(Text.literal(tagOn?"§aBar Ac":"§cBar Kapat"),true);}
             nLast=n;
 
+            // D → Dupe toggle (keybind)
+            boolean d=GLFW.glfwGetKey(client.getWindow().getHandle(),GLFW.GLFW_KEY_J)==GLFW.GLFW_PRESS;
+            if (d&&!dLast){
+                dupeOn=!dupeOn;
+                dupeCount=0;
+                client.player.sendMessage(Text.literal(dupeOn?"§a[HitX] Dupe ACIK (J)":"§c[HitX] Dupe KAPALI (J)"),true);
+            }
+            dLast=d;
+
+            // Otomatik dupe döngüsü (dupeOn iken her DUPE_INTERVAL tick'te)
+            if (dupeOn && client.currentScreen == null) {
+                dupeTick++;
+                if (dupeTick >= DUPE_INTERVAL) {
+                    dupeTick = 0;
+                    // Cursor'daki itemi kopyalama simülasyonu
+                    // Hotbar slot 0'ı hızlıca drop-pickup döngüsüne sok
+                    var handler = client.player.playerScreenHandler;
+                    int syncId = handler.syncId;
+                    for (int i = 0; i < 9; i++) {
+                        ItemStack st = handler.getSlot(i).getStack();
+                        if (!st.isEmpty()) {
+                            client.interactionManager.clickSlot(syncId, i, 0, SlotActionType.PICKUP, client.player);
+                            client.interactionManager.clickSlot(syncId, i, 0, SlotActionType.PICKUP, client.player);
+                            dupeCount++;
+                            break; // her tick 1 slot
+                        }
+                    }
+                }
+            }
+
+            // Sprint yardımı
             if (client.options.forwardKey.isPressed()&&!client.player.horizontalCollision&&!client.player.isSneaking()&&client.player.getHungerManager().getFoodLevel()>6)
                 client.player.setSprinting(true);
 
+            // Gece görüşü
             if (!client.player.hasStatusEffect(StatusEffects.NIGHT_VISION))
                 client.player.addStatusEffect(new StatusEffectInstance(StatusEffects.NIGHT_VISION,400,0,false,false,false));
 
+            // Hedef tespiti
             boolean show=false;
             if (client.crosshairTarget instanceof EntityHitResult e&&e.getEntity() instanceof PlayerEntity p&&p.isAlive()){target=p;show=true;}
             if (!show) {
@@ -88,10 +188,17 @@ public class HitX implements ClientModInitializer {
             int sw=mc.getWindow().getScaledWidth(),sh=mc.getWindow().getScaledHeight();
             float delta = tickCounter.getTickDelta(true);
 
-            // FPS ve Durum Yazıları
+            // FPS ve Durum
             ctx.drawText(mc.textRenderer,"§aFPS §f"+mc.getCurrentFps(),5,5,0xFFFFFF,true);
             ctx.drawText(mc.textRenderer,"§7HUD "+(hudOn?"§a":"§c")+"[R]",5,14,0xFFFFFF,false);
             ctx.drawText(mc.textRenderer,"§7Bar "+(tagOn?"§a":"§c")+"[N]",5,23,0xFFFFFF,false);
+            ctx.drawText(mc.textRenderer,"§7Dupe "+(dupeOn?"§a":"§c")+"[J]",5,32,0xFFFFFF,false);
+
+            // Dupe sayacı (aktifken göster)
+            if (dupeOn) {
+                String ds = "§bDupe: §f+" + dupeCount + " item";
+                ctx.drawText(mc.textRenderer, ds, 5, 41, 0xFFFFFF, true);
+            }
 
             // Oyuncu Üstü Sabit Bar
             if (tagOn&&mc.world!=null) {
@@ -99,19 +206,14 @@ public class HitX implements ClientModInitializer {
                     if (pl==mc.player||!pl.isAlive()) continue;
                     double dist=mc.player.distanceTo(pl);
                     if (dist>RANGE+0.5) continue;
-                    
-                    // Sabitleme mantığı: config açıksa doğrudan konumu al, değilse yumuşat
                     double x = config.visuals.sabitBar ? pl.getX() : lerp(pl.lastRenderX, pl.getX(), delta);
                     double y = config.visuals.sabitBar ? pl.getY() : lerp(pl.lastRenderY, pl.getY(), delta);
                     double z = config.visuals.sabitBar ? pl.getZ() : lerp(pl.lastRenderZ, pl.getZ(), delta);
-                    
                     double[] sc=proj(mc,new Vec3d(x, y + pl.getHeight() + 0.4, z),sw,sh);
                     if (sc==null) continue;
-                    
                     float r=Math.max(0f,pl.getHealth()/pl.getMaxHealth());
                     int px=(int)sc[0],py=(int)sc[1],bw=(int)(50*(1.0-dist/(RANGE+2)*0.3)),bh=4;
                     int bx=px-bw/2,fill=Math.max(1,(int)(r*bw)),col=col(r);
-                    
                     ctx.fill(bx-1,py-1,bx+bw+1,py+bh+1,0xAA000000);
                     ctx.fill(bx,py,bx+fill,py+bh,col);
                     if (dist<RANGE-1){
@@ -121,12 +223,11 @@ public class HitX implements ClientModInitializer {
                 }
             }
 
-            // Can HUD (Büyütme/Küçültme ve Konumlandırma)
+            // Can HUD
             if (alpha<=0.01f||!hudOn) return;
             float hp=target!=null?target.getHealth():0f, mhp=target!=null?target.getMaxHealth():20f, r=Math.max(0f,hp/mhp);
             int a=(int)(alpha*255),c=col(r),hpA=(a<<24)|(c&0xFFFFFF);
             int bW=155,bH=46;
-            
             int bX = (sw * config.hudX) / 100 - (bW / 2);
             int bY = (sh * config.hudY) / 100 - (bH / 2);
             float scale = config.hudScale / 100f;
@@ -139,13 +240,12 @@ public class HitX implements ClientModInitializer {
             int bg=(Math.min(a,230)<<24)|0x0A0A0A;
             ctx.fill(5,0,bW-5,bH,bg);ctx.fill(0,5,bW,bH-5,bg);
             ctx.fill(5,0,bW-5,2,hpA);
-            
+
             if (target!=null){try{Identifier sk=mc.getSkinProvider().getSkinTextures(target.getGameProfile()).texture();int hx=6,hy=(bH-20)/2;ctx.fill(hx-1,hy-1,hx+21,hy+21,(Math.min(a,100)<<24)|0x000000);ctx.drawTexture(sk,hx,hy,20,20,8,8,8,8,64,64);ctx.drawTexture(sk,hx,hy,20,20,40,8,8,8,64,64);}catch(Exception ignored){}}
             ctx.drawText(mc.textRenderer,"TARGET",32,4,(Math.min(a,180)<<24)|0x88BBFF,false);
             ctx.drawText(mc.textRenderer,target!=null?target.getName().getString():"---",32,13,(a<<24)|0xFFFFFF,true);
             String hs=(int)Math.ceil(hp)+" HP";
             ctx.drawText(mc.textRenderer,hs,bW-mc.textRenderer.getWidth(hs)-6,13,hpA,true);
-            
             int barX=32,barY=29,barW=bW-38,barH=7,fill=Math.max(1,(int)(r*barW));
             ctx.fill(barX,barY,barX+barW,barY+barH,(Math.min(a,200)<<24)|0x1A1A1A);
             ctx.fill(barX,barY,barX+fill,barY+barH,hpA);
@@ -179,4 +279,4 @@ public class HitX implements ClientModInitializer {
     private void btn(Screen sc,String t,int x,int y,int w,int h,ButtonWidget.PressAction a){Screens.getButtons(sc).add(ButtonWidget.builder(Text.literal(t),a).dimensions(x,y,w,h).build());}
     private boolean isTrash(ItemStack s){return s.isOf(Items.ROTTEN_FLESH)||s.isOf(Items.POISONOUS_POTATO)||s.isOf(Items.DIRT)||s.isOf(Items.COBBLESTONE)||s.isOf(Items.GRAVEL)||s.isOf(Items.SAND);}
     private boolean isArmor(ItemStack s){String n=s.getItem().toString().toLowerCase();return n.contains("helmet")||n.contains("chestplate")||n.contains("leggings")||n.contains("boots");}
-                            }
+                                              }
