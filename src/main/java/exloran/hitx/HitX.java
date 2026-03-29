@@ -24,7 +24,6 @@ import java.util.List;
 
 public class HitX implements ClientModInitializer {
 
-    // Hedef oyuncu — Tick'te güncellenir, HUD'da kullanılır
     private PlayerEntity cachedTarget = null;
 
     @Override
@@ -107,31 +106,20 @@ public class HitX implements ClientModInitializer {
                 );
             }
 
-            // ── Hedef Güncelleme ──
-            // Önce crosshair'e bak (vanilla targetedEntity)
+            // Hedef güncelle — önce crosshair, yoksa 16 blok içi en yakın
             if (client.targetedEntity instanceof PlayerEntity p) {
                 cachedTarget = p;
-                return;
-            }
-
-            // Crosshair'de yoksa: 16 blok içindeki en yakın PlayerEntity'yi al
-            Box searchBox = client.player.getBoundingBox().expand(16.0);
-            List<PlayerEntity> nearby = client.world.getEntitiesByClass(
-                PlayerEntity.class,
-                searchBox,
-                e -> e != client.player && e.isAlive()
-            );
-
-            if (!nearby.isEmpty()) {
-                // En yakınını bul
-                cachedTarget = nearby.stream()
+            } else {
+                Box box = client.player.getBoundingBox().expand(16.0);
+                List<PlayerEntity> nearby = client.world.getEntitiesByClass(
+                    PlayerEntity.class, box,
+                    e -> e != client.player && e.isAlive()
+                );
+                cachedTarget = nearby.isEmpty() ? null : nearby.stream()
                     .min((a, b) -> Double.compare(
                         a.squaredDistanceTo(client.player),
-                        b.squaredDistanceTo(client.player)
-                    ))
+                        b.squaredDistanceTo(client.player)))
                     .orElse(null);
-            } else {
-                cachedTarget = null;
             }
         });
 
@@ -143,8 +131,9 @@ public class HitX implements ClientModInitializer {
             int sw = client.getWindow().getScaledWidth();
             int sh = client.getWindow().getScaledHeight();
 
-            // ── FPS ──
-            drawContext.drawText(client.textRenderer, "FPS: " + client.getCurrentFps(), 5, 5, 0x00FF00, true);
+            // ── FPS (Sol Üst) ──
+            drawContext.drawText(client.textRenderer,
+                "FPS: " + client.getCurrentFps(), 5, 5, 0x00FF00, true);
 
             // ── Düşük Can Uyarısı ──
             if (client.player.getHealth() <= 6.0f) {
@@ -155,7 +144,8 @@ public class HitX implements ClientModInitializer {
             }
 
             // ─────────────────────────────────────────────────────────────
-            // TARGET HUD — Pojav tarzı, sağ orta
+            // TARGET HUD
+            // Konum: SOL ALT — hotbar'ın hemen üstü, scoreboard ile çakışmaz
             // ─────────────────────────────────────────────────────────────
             PlayerEntity target = cachedTarget;
             if (target != null && target.isAlive()) {
@@ -164,68 +154,83 @@ public class HitX implements ClientModInitializer {
                 float maxHealth = target.getMaxHealth();
                 int   hpInt     = (int) Math.ceil(health);
 
-                int boxW = 130;
-                int boxH = 36;
-                int rad  = 5;
-
-                // Sağ taraf, dikey ortanın biraz yukarısı
-                int boxX = sw - boxW - 12;
-                int boxY = (sh / 2) - boxH / 2 - 20;
-
-                // Animasyonlu bar rengi: Sarı → Pembe → Beyaz
+                // Animasyonlu renk: Sarı → Pembe → Beyaz
                 float cycle  = (System.currentTimeMillis() % 2000) / 2000f;
                 int barColor = animatedBarColor(cycle);
 
+                // ── Boyutlar ──
+                int boxW = 140;
+                int boxH = 42;
+                int rad  = 5;
+
+                // ── Konum: Sol alt, hotbar'ın üstünde ──
+                // Hotbar ~22px yüksekte + 2px boşluk
+                int boxX = 8;
+                int boxY = sh - boxH - 24;
+
                 drawContext.getMatrices().push();
-                drawContext.getMatrices().translate(boxX, boxY, 0);
+                drawContext.getMatrices().translate(boxX, boxY, 200); // z=200 → her şeyin üstünde
 
-                // ── Yuvarlak köşeli arka plan ──
-                drawContext.fill(rad, 0,    boxW - rad, boxH,      0xEE111111);
-                drawContext.fill(0,   rad,  boxW,       boxH - rad, 0xEE111111);
+                // ── Arka plan: Yuvarlak köşeli koyu kutu ──
+                drawContext.fill(rad, 0,    boxW - rad, boxH,       0xEE0D0D0D);
+                drawContext.fill(0,   rad,  boxW,       boxH - rad, 0xEE0D0D0D);
 
-                // ── Oyuncu kafası (skin, 14x14) ──
+                // ── Renkli üst çizgi (animasyonlu) ──
+                drawContext.fill(rad, 0, boxW - rad, 2, 0xFF000000 | barColor);
+
+                // ── Oyuncu kafası (16x16) ──
                 try {
                     Identifier skin = client.getSkinProvider()
                         .getSkinTextures(target.getGameProfile()).texture();
-                    int hx = 6, hy = (boxH - 14) / 2;
-                    drawContext.drawTexture(skin, hx, hy, 14, 14, 8,  8, 8, 8, 64, 64);
-                    drawContext.drawTexture(skin, hx, hy, 14, 14, 40, 8, 8, 8, 64, 64);
-                } catch (Exception ignored) {
-                    // Skin yüklenmediyse boş bırak
-                }
+                    // Kafa arka plan (koyu kare)
+                    drawContext.fill(5, 6, 23, 24, 0x55000000);
+                    // Kafa layer 1
+                    drawContext.drawTexture(skin, 5, 6, 18, 18, 8,  8, 8, 8, 64, 64);
+                    // Kafa overlay
+                    drawContext.drawTexture(skin, 5, 6, 18, 18, 40, 8, 8, 8, 64, 64);
+                } catch (Exception ignored) {}
 
-                // ── İsim ──
+                // ── Oyuncu adı (beyaz, bold-shadow) ──
                 String name = target.getName().getString();
-                drawContext.drawText(client.textRenderer, name, 25, 5, 0xFFFFFF, true);
+                // İsmin üstünde küçük "TARGET" etiketi
+                drawContext.drawText(client.textRenderer,
+                    "§7TARGET", 27, 4, 0xAAAAAA, false);
+                drawContext.drawText(client.textRenderer,
+                    "§f" + name, 27, 13, 0xFFFFFF, true);
 
-                // ── Sağ üstte can sayısı ──
-                String hpStr = String.valueOf(hpInt);
+                // ── Sağ tarafta can sayısı (büyük, animasyonlu renkle) ──
+                String hpStr = hpInt + " §7❤";
                 int hpW = client.textRenderer.getWidth(hpStr);
-                drawContext.drawText(client.textRenderer, hpStr,
-                    boxW - hpW - 5, 5, 0xFF000000 | barColor, true);
+                drawContext.drawText(client.textRenderer,
+                    hpStr, boxW - hpW - 6, 13, 0xFF000000 | barColor, true);
 
-                // ── Can barı ──
-                int barX   = 25;
-                int barY   = 25;
+                // ── Can barı (altta, animasyonlu) ──
+                int barX   = 27;
+                int barY   = 28;
                 int barW   = boxW - barX - 6;
-                int barH   = 5;
+                int barH   = 6;
                 int filled = Math.max(1, (int) ((health / maxHealth) * barW));
 
                 // Arka plan
-                drawContext.fill(barX, barY, barX + barW, barY + barH, 0xFF2A2A2A);
-                // Dolu (animasyonlu renk)
+                drawContext.fill(barX, barY, barX + barW, barY + barH, 0xFF1E1E1E);
+                // Dolu kısım
                 drawContext.fill(barX, barY, barX + filled, barY + barH, 0xFF000000 | barColor);
-                // Parlaklık şeridi (üst ince beyaz)
-                drawContext.fill(barX, barY, barX + filled, barY + 1, 0x55FFFFFF);
+                // Parlaklık şeridi
+                drawContext.fill(barX, barY, barX + filled, barY + 2, 0x44FFFFFF);
+                // Yüzde etiketi (bar içinde sağda)
+                String pct = (int)((health / maxHealth) * 100) + "%";
+                int pctW = client.textRenderer.getWidth(pct);
+                if (filled > pctW + 4) {
+                    drawContext.drawText(client.textRenderer, pct,
+                        barX + filled - pctW - 2, barY - 1, 0xDDFFFFFF, false);
+                }
 
                 drawContext.getMatrices().pop();
             }
         });
     }
 
-    // ─────────────────────────────────────────
-    // Sarı → Pembe → Beyaz → Sarı animasyonu
-    // ─────────────────────────────────────────
+    // ── Sarı → Pembe → Beyaz → Sarı ──
     private int animatedBarColor(float t) {
         float r, g, b;
         if (t < 0.33f) {
@@ -257,9 +262,9 @@ public class HitX implements ClientModInitializer {
     }
 
     private boolean isArmor(ItemStack stack) {
-        String name = stack.getItem().toString().toLowerCase();
-        return name.contains("helmet") || name.contains("chestplate")
-            || name.contains("leggings") || name.contains("boots");
+        String n = stack.getItem().toString().toLowerCase();
+        return n.contains("helmet") || n.contains("chestplate")
+            || n.contains("leggings") || n.contains("boots");
     }
 
     public static class Module {
