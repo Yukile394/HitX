@@ -23,7 +23,6 @@ import net.minecraft.util.Identifier;
 import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.math.Vec3d;
 import org.lwjgl.glfw.GLFW;
-
 import java.util.List;
 
 public class HitX implements ClientModInitializer {
@@ -32,7 +31,6 @@ public class HitX implements ClientModInitializer {
     private PlayerEntity target = null;
     private float alpha = 0f;
     private boolean rLast = false, nLast = false;
-
     private static final double RANGE = 6.5, DOT = 0.97;
     private static final float FADE = 0.12f;
 
@@ -57,11 +55,9 @@ public class HitX implements ClientModInitializer {
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.player==null||client.world==null) return;
-
             boolean r=GLFW.glfwGetKey(client.getWindow().getHandle(),GLFW.GLFW_KEY_R)==GLFW.GLFW_PRESS;
             if (r&&!rLast){hudOn=!hudOn;client.player.sendMessage(Text.literal(hudOn?"§aHUD Ac":"§cHUD Kapat"),true);}
             rLast=r;
-
             boolean n=GLFW.glfwGetKey(client.getWindow().getHandle(),GLFW.GLFW_KEY_N)==GLFW.GLFW_PRESS;
             if (n&&!nLast){tagOn=!tagOn;client.player.sendMessage(Text.literal(tagOn?"§aBar Ac":"§cBar Kapat"),true);}
             nLast=n;
@@ -88,69 +84,71 @@ public class HitX implements ClientModInitializer {
         HudRenderCallback.EVENT.register((ctx, tickCounter)->{
             MinecraftClient mc=MinecraftClient.getInstance();
             if (mc.player==null||mc.options.hudHidden) return;
-            int sw=mc.getWindow().getScaledWidth(),sh=mc.getWindow().getScaledHeight();
             HitXConfig config = AutoConfig.getConfigHolder(HitXConfig.class).getConfig();
-            
-            // Hata veren kısım düzeltildi: tickCounter'dan delta alınıyor
+            int sw=mc.getWindow().getScaledWidth(),sh=mc.getWindow().getScaledHeight();
             float delta = tickCounter.getTickDelta(true);
 
+            // FPS ve Durum Yazıları
             ctx.drawText(mc.textRenderer,"§aFPS §f"+mc.getCurrentFps(),5,5,0xFFFFFF,true);
             ctx.drawText(mc.textRenderer,"§7HUD "+(hudOn?"§a":"§c")+"[R]",5,14,0xFFFFFF,false);
             ctx.drawText(mc.textRenderer,"§7Bar "+(tagOn?"§a":"§c")+"[N]",5,23,0xFFFFFF,false);
 
+            // Oyuncu Üstü Sabit Bar
             if (tagOn&&mc.world!=null) {
                 for (PlayerEntity pl:mc.world.getPlayers()) {
                     if (pl==mc.player||!pl.isAlive()) continue;
                     double dist=mc.player.distanceTo(pl);
                     if (dist>RANGE+0.5) continue;
-                    float r=Math.max(0f,pl.getHealth()/pl.getMaxHealth());
                     
-                    // Yumuşak hareketler için delta kullanıldı
-                    double smoothX = lerp(pl.lastRenderX, pl.getX(), delta);
-                    double smoothY = lerp(pl.lastRenderY, pl.getY(), delta) + pl.getHeight() + 0.35;
-                    double smoothZ = lerp(pl.lastRenderZ, pl.getZ(), delta);
-
-                    double[] sc=proj(mc,new Vec3d(smoothX, smoothY, smoothZ),sw,sh);
+                    // Sabitleme mantığı: config açıksa doğrudan konumu al, değilse yumuşat
+                    double x = config.visuals.sabitBar ? pl.getX() : lerp(pl.lastRenderX, pl.getX(), delta);
+                    double y = config.visuals.sabitBar ? pl.getY() : lerp(pl.lastRenderY, pl.getY(), delta);
+                    double z = config.visuals.sabitBar ? pl.getZ() : lerp(pl.lastRenderZ, pl.getZ(), delta);
+                    
+                    double[] sc=proj(mc,new Vec3d(x, y + pl.getHeight() + 0.4, z),sw,sh);
                     if (sc==null) continue;
                     
-                    int px=(int)sc[0],py=(int)sc[1],bw=(int)(48*(1.0-dist/(RANGE+1)*0.4)),bh=4;
+                    float r=Math.max(0f,pl.getHealth()/pl.getMaxHealth());
+                    int px=(int)sc[0],py=(int)sc[1],bw=(int)(50*(1.0-dist/(RANGE+2)*0.3)),bh=4;
                     int bx=px-bw/2,fill=Math.max(1,(int)(r*bw)),col=col(r);
                     
                     ctx.fill(bx-1,py-1,bx+bw+1,py+bh+1,0xAA000000);
                     ctx.fill(bx,py,bx+fill,py+bh,col);
-                    ctx.fill(bx,py,bx+fill,py+1,0x33FFFFFF);
-                    
-                    if (dist<RANGE){
+                    if (dist<RANGE-1){
                         String nm=pl.getName().getString();
                         ctx.drawText(mc.textRenderer,nm,px-mc.textRenderer.getWidth(nm)/2,py-10,0xFFFFFF,true);
                     }
                 }
             }
 
+            // Can HUD (Büyütme/Küçültme ve Konumlandırma)
             if (alpha<=0.01f||!hudOn) return;
-            float hp=target!=null?target.getHealth():0f;
-            float mhp=target!=null?target.getMaxHealth():20f;
-            float r=mhp>0?Math.max(0f,hp/mhp):0f;
+            float hp=target!=null?target.getHealth():0f, mhp=target!=null?target.getMaxHealth():20f, r=Math.max(0f,hp/mhp);
             int a=(int)(alpha*255),c=col(r),hpA=(a<<24)|(c&0xFFFFFF);
-            int bW=155,bH=46,rad=5;
+            int bW=155,bH=46;
             
-            int bX = (sw * config.hudXPercent) / 100 - (bW / 2);
-            int bY = (sh * config.hudYPercent) / 100 - (bH / 2);
+            int bX = (sw * config.hudX) / 100 - (bW / 2);
+            int bY = (sh * config.hudY) / 100 - (bH / 2);
+            float scale = config.hudScale / 100f;
 
             ctx.getMatrices().push();
-            ctx.getMatrices().translate(bX,bY,200);
+            ctx.getMatrices().translate(bX + bW/2f, bY + bH/2f, 200);
+            ctx.getMatrices().scale(scale, scale, 1);
+            ctx.getMatrices().translate(-bW/2f, -bH/2f, 0);
+
             int bg=(Math.min(a,230)<<24)|0x0A0A0A;
-            ctx.fill(rad,0,bW-rad,bH,bg);ctx.fill(0,rad,bW,bH-rad,bg);
-            ctx.fill(rad,0,bW-rad,2,hpA);
+            ctx.fill(5,0,bW-5,bH,bg);ctx.fill(0,5,bW,bH-5,bg);
+            ctx.fill(5,0,bW-5,2,hpA);
+            
             if (target!=null){try{Identifier sk=mc.getSkinProvider().getSkinTextures(target.getGameProfile()).texture();int hx=6,hy=(bH-20)/2;ctx.fill(hx-1,hy-1,hx+21,hy+21,(Math.min(a,100)<<24)|0x000000);ctx.drawTexture(sk,hx,hy,20,20,8,8,8,8,64,64);ctx.drawTexture(sk,hx,hy,20,20,40,8,8,8,64,64);}catch(Exception ignored){}}
             ctx.drawText(mc.textRenderer,"TARGET",32,4,(Math.min(a,180)<<24)|0x88BBFF,false);
             ctx.drawText(mc.textRenderer,target!=null?target.getName().getString():"---",32,13,(a<<24)|0xFFFFFF,true);
-            String hs=(int)Math.ceil(hp)+" H";int hw=mc.textRenderer.getWidth(hs);
-            ctx.drawText(mc.textRenderer,hs,bW-hw-6,13,hpA,true);
-            int barX=32,barY=29,barW=bW-32-6,barH=7,fill=Math.max(1,(int)(r*barW));
+            String hs=(int)Math.ceil(hp)+" HP";
+            ctx.drawText(mc.textRenderer,hs,bW-mc.textRenderer.getWidth(hs)-6,13,hpA,true);
+            
+            int barX=32,barY=29,barW=bW-38,barH=7,fill=Math.max(1,(int)(r*barW));
             ctx.fill(barX,barY,barX+barW,barY+barH,(Math.min(a,200)<<24)|0x1A1A1A);
             ctx.fill(barX,barY,barX+fill,barY+barH,hpA);
-            ctx.fill(barX,barY,barX+fill,barY+2,(Math.min(a/4,50)<<24)|0xFFFFFF);
             ctx.getMatrices().pop();
         });
     }
@@ -161,16 +159,11 @@ public class HitX implements ClientModInitializer {
             Vec3d rel=world.subtract(cam.getPos());
             if (mc.player.getRotationVec(1f).dotProduct(rel.normalize())<0) return null;
             double yr=Math.toRadians(cam.getYaw()),pr=Math.toRadians(cam.getPitch());
-            double rx=rel.x*Math.cos(yr)-rel.z*Math.sin(yr);
-            double ry=rel.y;
-            double rz=rel.x*Math.sin(yr)+rel.z*Math.cos(yr);
-            double ry2=ry*Math.cos(pr)-rz*Math.sin(pr);
-            double rz2=ry*Math.sin(pr)+rz*Math.cos(pr);
-            if (rz2<=0.05) return null;
-            double fov=Math.toRadians(mc.options.getFov().getValue());
-            double p=sw/(2.0*Math.tan(fov/2.0));
-            double x=sw/2.0+(rx/rz2)*p, y=sh/2.0-(ry2/rz2)*p;
-            return new double[]{x,y};
+            double rx=rel.x*Math.cos(yr)-rel.z*Math.sin(yr), ry=rel.y, rz=rel.x*Math.sin(yr)+rel.z*Math.cos(yr);
+            double ry2=ry*Math.cos(pr)-rz*Math.sin(pr), rz2=ry*Math.sin(pr)+rz*Math.cos(pr);
+            if (rz2<=0.1) return null;
+            double fov=Math.toRadians(mc.options.getFov().getValue()), p=sw/(2.0*Math.tan(fov/2.0));
+            return new double[]{sw/2.0+(rx/rz2)*p, sh/2.0-(ry2/rz2)*p};
         } catch (Exception e) { return null; }
     }
 
@@ -186,4 +179,4 @@ public class HitX implements ClientModInitializer {
     private void btn(Screen sc,String t,int x,int y,int w,int h,ButtonWidget.PressAction a){Screens.getButtons(sc).add(ButtonWidget.builder(Text.literal(t),a).dimensions(x,y,w,h).build());}
     private boolean isTrash(ItemStack s){return s.isOf(Items.ROTTEN_FLESH)||s.isOf(Items.POISONOUS_POTATO)||s.isOf(Items.DIRT)||s.isOf(Items.COBBLESTONE)||s.isOf(Items.GRAVEL)||s.isOf(Items.SAND);}
     private boolean isArmor(ItemStack s){String n=s.getItem().toString().toLowerCase();return n.contains("helmet")||n.contains("chestplate")||n.contains("leggings")||n.contains("boots");}
-                        }
+                            }
