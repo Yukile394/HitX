@@ -38,11 +38,8 @@ public class HitX implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
-        
-        // AutoConfig Başlatma
         AutoConfig.register(HitXConfig.class, GsonConfigSerializer::new);
 
-        // GUI
         ScreenEvents.AFTER_INIT.register((client, screen, W, H) -> {
             if (screen instanceof GenericContainerScreen chest) {
                 int sx = W/2+92, sy = H/2-80, id = chest.getScreenHandler().syncId;
@@ -58,7 +55,6 @@ public class HitX implements ClientModInitializer {
             }
         });
 
-        // Tick
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.player==null||client.world==null) return;
 
@@ -89,23 +85,19 @@ public class HitX implements ClientModInitializer {
             alpha=show&&hudOn?Math.min(1f,alpha+FADE):Math.max(0f,alpha-FADE);
         });
 
-        // HUD
-        HudRenderCallback.EVENT.register((ctx,td)->{
+        HudRenderCallback.EVENT.register((ctx, tickCounter)->{
             MinecraftClient mc=MinecraftClient.getInstance();
             if (mc.player==null||mc.options.hudHidden) return;
             int sw=mc.getWindow().getScaledWidth(),sh=mc.getWindow().getScaledHeight();
             HitXConfig config = AutoConfig.getConfigHolder(HitXConfig.class).getConfig();
+            
+            // Hata veren kısım düzeltildi: tickCounter'dan delta alınıyor
+            float delta = tickCounter.getTickDelta(true);
 
             ctx.drawText(mc.textRenderer,"§aFPS §f"+mc.getCurrentFps(),5,5,0xFFFFFF,true);
             ctx.drawText(mc.textRenderer,"§7HUD "+(hudOn?"§a":"§c")+"[R]",5,14,0xFFFFFF,false);
             ctx.drawText(mc.textRenderer,"§7Bar "+(tagOn?"§a":"§c")+"[N]",5,23,0xFFFFFF,false);
 
-            if (mc.player.getHealth()<=6f) {
-                String w="!! DUSUK CAN !!";
-                ctx.drawText(mc.textRenderer,w,(sw-mc.textRenderer.getWidth(w))/2,sh/2-30,0xFF2222,true);
-            }
-
-            // Düzeltilmiş Oyuncu Üstü Can Barı
             if (tagOn&&mc.world!=null) {
                 for (PlayerEntity pl:mc.world.getPlayers()) {
                     if (pl==mc.player||!pl.isAlive()) continue;
@@ -113,10 +105,10 @@ public class HitX implements ClientModInitializer {
                     if (dist>RANGE+0.5) continue;
                     float r=Math.max(0f,pl.getHealth()/pl.getMaxHealth());
                     
-                    // Pozisyonu TickDelta ile yumuşat (Titremeyi önler)
-                    double smoothX = lerp(pl.lastRenderX, pl.getX(), td);
-                    double smoothY = lerp(pl.lastRenderY, pl.getY(), td) + pl.getHeight() + 0.35;
-                    double smoothZ = lerp(pl.lastRenderZ, pl.getZ(), td);
+                    // Yumuşak hareketler için delta kullanıldı
+                    double smoothX = lerp(pl.lastRenderX, pl.getX(), delta);
+                    double smoothY = lerp(pl.lastRenderY, pl.getY(), delta) + pl.getHeight() + 0.35;
+                    double smoothZ = lerp(pl.lastRenderZ, pl.getZ(), delta);
 
                     double[] sc=proj(mc,new Vec3d(smoothX, smoothY, smoothZ),sw,sh);
                     if (sc==null) continue;
@@ -142,7 +134,6 @@ public class HitX implements ClientModInitializer {
             int a=(int)(alpha*255),c=col(r),hpA=(a<<24)|(c&0xFFFFFF);
             int bW=155,bH=46,rad=5;
             
-            // Config'den gelen X ve Y yüzdelerine göre pozisyon hesaplama
             int bX = (sw * config.hudXPercent) / 100 - (bW / 2);
             int bY = (sh * config.hudYPercent) / 100 - (bH / 2);
 
@@ -179,7 +170,6 @@ public class HitX implements ClientModInitializer {
             double fov=Math.toRadians(mc.options.getFov().getValue());
             double p=sw/(2.0*Math.tan(fov/2.0));
             double x=sw/2.0+(rx/rz2)*p, y=sh/2.0-(ry2/rz2)*p;
-            if (x<-100||x>sw+100||y<-100||y>sh+100) return null;
             return new double[]{x,y};
         } catch (Exception e) { return null; }
     }
