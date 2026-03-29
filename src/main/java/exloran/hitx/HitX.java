@@ -10,6 +10,8 @@ import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.ingame.GenericContainerScreen;
 import net.minecraft.client.gui.screen.ingame.InventoryScreen;
 import net.minecraft.client.gui.widget.ButtonWidget;
+import net.minecraft.entity.effect.StatusEffectInstance;
+import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
@@ -22,7 +24,7 @@ public class HitX implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
-        
+
         // ================= 1. GUI / EKRAN BUTONLARI (ESKİ YAPI KORUNDU) =================
         ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
             
@@ -102,6 +104,12 @@ public class HitX implements ClientModInitializer {
                 if (client.options.forwardKey.isPressed() && !client.player.horizontalCollision && !client.player.isSneaking() && client.player.getHungerManager().getFoodLevel() > 6) {
                     client.player.setSprinting(true);
                 }
+                
+                // Fullbright (Sınırsız Gece Görüşü - PvP için)
+                if (!client.player.hasStatusEffect(StatusEffects.NIGHT_VISION)) {
+                    // Parçacık (particle) efekti olmadan, ekranı temiz bir şekilde aydınlatır
+                    client.player.addStatusEffect(new StatusEffectInstance(StatusEffects.NIGHT_VISION, 400, 0, false, false, false));
+                }
             }
         });
 
@@ -113,60 +121,104 @@ public class HitX implements ClientModInitializer {
             int screenWidth = client.getWindow().getScaledWidth();
             int screenHeight = client.getWindow().getScaledHeight();
 
+            // --- FPS GÖSTERGESİ (Sol Üst) ---
+            String fpsText = "FPS: " + client.getCurrentFps();
+            drawContext.drawText(client.textRenderer, fpsText, 5, 5, 0x00FF00, true);
+
             // --- DÜŞÜK CAN UYARISI ---
-            if (client.player.getHealth() <= 6.0f) { // 3 kalp ve altı
+            if (client.player.getHealth() <= 6.0f) { 
                 String warningText = "⚠ DÜŞÜK CAN ⚠";
                 int textWidth = client.textRenderer.getWidth(warningText);
                 drawContext.drawText(client.textRenderer, warningText, (screenWidth / 2) - (textWidth / 2), (screenHeight / 2) - 30, 0xFF0000, true);
             }
 
-            // --- TARGET HUD (HEDEF EKRANI) ---
+            // --- ZIRH DURUMU (ARMOR HUD - Sağ Alt) ---
+            int armorX = screenWidth - 25;
+            int armorY = screenHeight - 60;
+            Iterable<ItemStack> armorItems = client.player.getArmorItems();
+            int yOffset = 0;
+            
+            for (ItemStack armor : armorItems) {
+                if (!armor.isEmpty()) {
+                    // Zırh ikonunu çiz
+                    drawContext.drawItem(armor, armorX, armorY - yOffset);
+                    drawContext.drawItemInSlot(client.textRenderer, armor, armorX, armorY - yOffset);
+                    
+                    // Zırh Dayanıklılığı (Durability)
+                    if (armor.isDamageable()) {
+                        int maxDamage = armor.getMaxDamage();
+                        int damage = armor.getDamage();
+                        int remaining = maxDamage - damage;
+                        String durText = String.valueOf(remaining);
+                        int textWidth = client.textRenderer.getWidth(durText);
+                        
+                        // Kırılmaya yaklaştıkça renk değiştir (Yeşil -> Sarı -> Kırmızı)
+                        int color = 0x00FF00;
+                        if (remaining <= maxDamage * 0.5f) color = 0xFFFF00;
+                        if (remaining <= maxDamage * 0.2f) color = 0xFF0000;
+                        
+                        drawContext.drawText(client.textRenderer, durText, armorX - textWidth - 5, armorY - yOffset + 4, color, true);
+                    }
+                }
+                yOffset += 18; // Bir üstteki zırha geç
+            }
+
+            // --- TARGET HUD (HEDEF EKRANI - Sol ve Biraz Aşağı) ---
             if (client.targetedEntity instanceof PlayerEntity target) {
                 
-                // Konum (Ekranın ortasının biraz sağ altı)
-                int x = (screenWidth / 2) + 15;
-                int y = (screenHeight / 2) + 15;
+                // Matris ayarları: Büyütme (Scale) ve Pozisyonlandırma (Translate)
+                drawContext.getMatrices().push();
+                
+                // Konum: Ekranın solunda, ortadan biraz aşağıda
+                int targetX = (screenWidth / 2) - 150; 
+                int targetY = (screenHeight / 2) + 20;
+                
+                drawContext.getMatrices().translate(targetX, targetY, 0);
+                
+                // Boyut: Orta Boyut (1.2x)
+                drawContext.getMatrices().scale(1.2f, 1.2f, 1.0f);
+
                 int width = 110;
                 int height = 40;
 
                 // Animasyonlu RGB Renk Hesaplama
                 float hue = (System.currentTimeMillis() % 3000) / 3000f;
                 int rgbColor = Color.HSBtoRGB(hue, 0.8f, 1.0f);
-                int borderColor = rgbColor | 0xFF000000; // Alpha ekleme (tam opak)
+                int borderColor = rgbColor | 0xFF000000; 
 
                 // Arka plan (Yarı saydam siyah)
-                drawContext.fill(x, y, x + width, y + height, 0x90000000);
+                drawContext.fill(0, 0, width, height, 0x90000000);
 
                 // İnce Kare Çerçeve (Animasyonlu)
-                drawContext.fill(x, y, x + width, y + 1, borderColor); // Üst
-                drawContext.fill(x, y + height - 1, x + width, y + height, borderColor); // Alt
-                drawContext.fill(x, y, x + 1, y + height, borderColor); // Sol
-                drawContext.fill(x + width - 1, y, x + width, y + height, borderColor); // Sağ
+                drawContext.fill(0, 0, width, 1, borderColor); // Üst
+                drawContext.fill(0, height - 1, width, height, borderColor); // Alt
+                drawContext.fill(0, 0, 1, height, borderColor); // Sol
+                drawContext.fill(width - 1, 0, width, height, borderColor); // Sağ
 
                 // Oyuncu İsmi
                 String targetName = target.getName().getString();
-                drawContext.drawText(client.textRenderer, targetName, x + 5, y + 5, 0xFFFFFF, true);
+                drawContext.drawText(client.textRenderer, targetName, 5, 5, 0xFFFFFF, true);
 
-                // Can Değeri Sayısal Olarak (Örn: 15.0 / 20.0)
+                // Arapça 2 Harfli Can Yazısı (دم -> Kan/Can demek)
                 float health = target.getHealth();
                 float maxHealth = target.getMaxHealth();
-                String healthText = String.format("%.1f / %.1f HP", health, maxHealth);
+                String healthText = String.format("%.1f / %.1f دم", health, maxHealth);
                 
-                // Can rengini can miktarına göre ayarlama (Yeşil -> Sarı -> Kırmızı)
                 int hpColor = 0x00FF00;
                 if (health <= maxHealth * 0.5f) hpColor = 0xFFFF00;
                 if (health <= maxHealth * 0.25f) hpColor = 0xFF0000;
                 
-                drawContext.drawText(client.textRenderer, healthText, x + 5, y + 16, hpColor, true);
+                drawContext.drawText(client.textRenderer, healthText, 5, 16, hpColor, true);
 
                 // Can Barı (Altta)
                 int barWidth = 100;
                 int currentBarWidth = (int) ((health / maxHealth) * barWidth);
                 
-                // Bar Arka Planı (Koyu Gri)
-                drawContext.fill(x + 5, y + 28, x + 5 + barWidth, y + 33, 0xFF444444);
-                // Bar Ön Planı (Animasyonlu Renk veya Can Rengi - Ben uyumlu olsun diye RGB yaptım)
-                drawContext.fill(x + 5, y + 28, x + 5 + currentBarWidth, y + 33, borderColor);
+                drawContext.fill(5, 28, 5 + barWidth, 33, 0xFF444444);
+                drawContext.fill(5, 28, 5 + currentBarWidth, 33, borderColor);
+
+                // Matrisi eski haline getir (diğer çizimleri bozmamak için)
+                drawContext.getMatrices().pop();
             }
         });
     }
@@ -186,7 +238,6 @@ public class HitX implements ClientModInitializer {
         return name.contains("helmet") || name.contains("chestplate") || name.contains("leggings") || name.contains("boots");
     }
 
-    // İleride menü için kullanılacak modül yapısı
     public static class Module {
         String name; 
         boolean enabled;
