@@ -6,12 +6,10 @@ import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.client.screen.v1.Screens;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.ingame.GenericContainerScreen;
 import net.minecraft.client.gui.screen.ingame.InventoryScreen;
 import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.entity.effect.StatusEffectInstance;
 import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.entity.player.PlayerEntity;
@@ -30,66 +28,52 @@ import java.util.List;
 
 public class HitX implements ClientModInitializer {
 
-    // ── Mod durumları ──
     private boolean hudEnabled     = true;
     private boolean nameTagEnabled = true;
-
-    // ── Target HUD ──
     private PlayerEntity cachedTarget = null;
-    private float        hudAlpha     = 0.0f;
+    private float hudAlpha = 0.0f;
 
-    // ── /ah sell dupe ──
-    // dupeState:
-    //   0 = bekliyor
-    //   1 = /ah sell <fiyat> gönderildi, onay bekleniyor
-    //   2 = satıldı, /ah cancel ile geri alınıyor (dupe döngüsü)
     private boolean dupeActive    = false;
     private int     dupeTimer     = 0;
     private int     dupeStep      = 0;
     private String  dupePrice     = "1000";
     private int     dupeLoopCount = 0;
+    private int     dupeLoopMax   = 0;
 
-    // ── Sabitler ──
-    private static final double SHOW_RANGE  = 6.5;  // Reach + biraz fazla
-    private static final double DOT_THRESH  = 0.97;
-    private static final float  FADE_SPEED  = 0.12f;
+    private static final double SHOW_RANGE = 6.5;
+    private static final double DOT_THRESH = 0.97;
+    private static final float  FADE_SPEED = 0.12f;
     private static final int    KEY_TOGGLE  = GLFW.GLFW_KEY_R;
     private static final int    KEY_NAMETAG = GLFW.GLFW_KEY_N;
 
-    // Tuş debounce
     private boolean rWasDown = false;
     private boolean nWasDown = false;
-
-    // Fiyat input için
-    private String pendingPrice = null;
 
     @Override
     public void onInitializeClient() {
 
-        // ================= 1. GUI BUTONLARI =================
+        // ===== 1. GUI BUTONLARI =====
         ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
 
-            // ── SANDIK ──
             if (screen instanceof GenericContainerScreen container) {
                 int xPos   = (scaledWidth / 2) + 92;
                 int yPos   = (scaledHeight / 2) - 80;
                 int syncId = container.getScreenHandler().syncId;
-
-                addButton(screen, "Herşeyi Al",  xPos, yPos,      85, 20, b -> {
+                addButton(screen, "Herseyi Al",  xPos, yPos,      85, 20, b -> {
                     int cs = container.getScreenHandler().getInventory().size();
                     for (int i = 0; i < cs; i++)
                         client.interactionManager.clickSlot(syncId, i, 0, SlotActionType.QUICK_MOVE, client.player);
                 });
-                addButton(screen, "Herşeyi Koy", xPos, yPos + 24, 85, 20, b -> {
+                addButton(screen, "Herseyi Koy", xPos, yPos + 24, 85, 20, b -> {
                     int cs = container.getScreenHandler().getInventory().size();
                     for (int i = cs; i < cs + 36; i++)
                         client.interactionManager.clickSlot(syncId, i, 0, SlotActionType.QUICK_MOVE, client.player);
                 });
-                addButton(screen, "Herşeyi At",  xPos, yPos + 48, 85, 20, b -> {
+                addButton(screen, "Herseyi At",  xPos, yPos + 48, 85, 20, b -> {
                     for (int i = 0; i < container.getScreenHandler().slots.size(); i++)
                         client.interactionManager.clickSlot(syncId, i, 1, SlotActionType.THROW, client.player);
                 });
-                addButton(screen, "Çöpleri At",  xPos, yPos + 72, 85, 20, b -> {
+                addButton(screen, "Copleri At",  xPos, yPos + 72, 85, 20, b -> {
                     for (int i = 0; i < container.getScreenHandler().slots.size(); i++) {
                         ItemStack stack = container.getScreenHandler().getSlot(i).getStack();
                         if (isTrash(stack))
@@ -98,102 +82,88 @@ public class HitX implements ClientModInitializer {
                 });
             }
 
-            // ── ENVANTER ──
             if (screen instanceof InventoryScreen inv) {
                 int x      = (scaledWidth - 176) / 2;
                 int y      = (scaledHeight - 166) / 2;
                 int syncId = inv.getScreenHandler().syncId;
 
-                // Normal butonlar
-                addButton(screen, "🛡", x - 25,  y,       20, 20, b -> {
+                addButton(screen, "Zirhi Giy", x - 50, y,       46, 20, b -> {
                     for (int i = 9; i < 45; i++) {
                         ItemStack stack = inv.getScreenHandler().getSlot(i).getStack();
                         if (isArmor(stack))
                             client.interactionManager.clickSlot(syncId, i, 0, SlotActionType.QUICK_MOVE, client.player);
                     }
                 });
-                addButton(screen, "🗑", x - 25,  y + 145, 20, 20, b -> {
+                addButton(screen, "Temizle", x - 50, y + 22, 46, 20, b -> {
                     for (int i = 9; i < 45; i++)
                         client.interactionManager.clickSlot(syncId, i, 1, SlotActionType.THROW, client.player);
                 });
 
-                // ── AH SELL DUPE BÖLÜMÜ ──
-                // Sağ tarafa yerleştir
-                int ahX = x + 181;
-                int ahY = y;
+                // AH SELL DUPE paneli — sag alt
+                int ahX = x + 182;
+                int ahY = y + 60;
 
-                // Fiyat yazısı etiketi
-                // "AH SELL DUPE" başlık butonu (tıklanamaz, sadece görsel)
-                addButton(screen, "§6AH SELL", ahX, ahY, 60, 10, b -> {});
-
-                // Fiyat: - + butonları ve değer göstergesi
-                addButton(screen, "-", ahX, ahY + 12, 18, 14, b -> {
-                    int p = safeParseInt(dupePrice, 1000);
+                addButton(screen, "-100",  ahX,      ahY,      38, 16, b -> {
+                    int p = safeInt(dupePrice, 1000);
                     dupePrice = String.valueOf(Math.max(1, p - 100));
                 });
-                addButton(screen, "+", ahX + 42, ahY + 12, 18, 14, b -> {
-                    int p = safeParseInt(dupePrice, 1000);
+                addButton(screen, "+100",  ahX + 40, ahY,      38, 16, b -> {
+                    int p = safeInt(dupePrice, 1000);
                     dupePrice = String.valueOf(p + 100);
                 });
-
-                // DUPE BAŞLAT butonu
-                addButton(screen, dupeActive ? "§cDUR" : "§aDUPE", ahX, ahY + 28, 60, 14, b -> {
+                addButton(screen, "x1",   ahX,      ahY + 18, 25, 14, b -> dupeLoopMax = 1);
+                addButton(screen, "x5",   ahX + 27, ahY + 18, 25, 14, b -> dupeLoopMax = 5);
+                addButton(screen, "x10",  ahX + 54, ahY + 18, 25, 14, b -> dupeLoopMax = 10);
+                addButton(screen, "sonsuz", ahX,    ahY + 34, 79, 14, b -> dupeLoopMax = 0);
+                addButton(screen, dupeActive ? ">> DUR <<" : ">> DUPE <<", ahX, ahY + 50, 79, 18, b -> {
                     if (!dupeActive) {
                         dupeActive    = true;
                         dupeStep      = 0;
-                        dupeTimer     = 0;
+                        dupeTimer     = 5;
                         dupeLoopCount = 0;
+                        client.setScreen(null);
                         client.player.sendMessage(
-                            Text.literal("§aDupe başlatıldı! Fiyat: §e" + dupePrice), true);
-                        client.setScreen(null); // Envanteri kapat, dupe başlasın
+                            Text.literal("§a[HitX] Dupe basladi! Fiyat: §e" + dupePrice
+                                + " §7Loop: §e" + (dupeLoopMax == 0 ? "sonsuz" : dupeLoopMax)), true);
                     } else {
                         dupeActive = false;
                         dupeStep   = 0;
                         dupeTimer  = 0;
-                        client.player.sendMessage(Text.literal("§cDupe durduruldu!"), true);
+                        client.player.sendMessage(Text.literal("§c[HitX] Dupe durduruldu."), true);
                     }
                 });
-
-                // x1 / x5 / x10 satış adet seçimi (loop sayısı)
-                addButton(screen, "x1",  ahX,      ahY + 44, 18, 12, b -> dupeLoopCount = 1);
-                addButton(screen, "x5",  ahX + 20, ahY + 44, 18, 12, b -> dupeLoopCount = 5);
-                addButton(screen, "x10", ahX + 40, ahY + 44, 20, 12, b -> dupeLoopCount = 10);
             }
         });
 
-        // ─── Envanter ekranında fiyatı çiz ───
+        // Envanter render - fiyat ve durum yazisi
         ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
-            if (screen instanceof InventoryScreen) {
-                ScreenEvents.afterRender(screen).register((scr, ctx, mx, my, delta) -> {
-                    int x = (scaledWidth - 176) / 2;
-                    int y = (scaledHeight - 166) / 2;
-                    int ahX = x + 181;
-                    int ahY = y;
-                    // Fiyat göster
-                    ctx.drawText(MinecraftClient.getInstance().textRenderer,
-                        "§f" + dupePrice, ahX + 20, ahY + 15, 0xFFFFFF, true);
-                    // Loop sayısı
-                    ctx.drawText(MinecraftClient.getInstance().textRenderer,
-                        "§7Loop: §e" + (dupeLoopCount == 0 ? "∞" : dupeLoopCount),
-                        ahX, ahY + 58, 0xFFFFFF, false);
-                    // Durum
-                    ctx.drawText(MinecraftClient.getInstance().textRenderer,
-                        dupeActive ? "§a● ÇALIŞIYOR" : "§c● DURDU",
-                        ahX, ahY + 68, 0xFFFFFF, false);
-                });
-            }
+            if (!(screen instanceof InventoryScreen)) return;
+            ScreenEvents.afterRender(screen).register((scr, ctx, mx, my, delta) -> {
+                int x   = (scaledWidth - 176) / 2;
+                int y   = (scaledHeight - 166) / 2;
+                int ahX = x + 182;
+                int ahY = y + 60;
+                ctx.drawText(client.textRenderer, "§6AH SELL DUPE", ahX, ahY - 10, 0xFFAA00, true);
+                ctx.drawText(client.textRenderer, "§fFiyat: §e" + dupePrice, ahX, ahY - 1, 0xFFFFFF, false);
+                ctx.drawText(client.textRenderer,
+                    "§7Loop: §e" + (dupeLoopMax == 0 ? "sonsuz" : dupeLoopMax),
+                    ahX + 40, ahY + 19, 0xFFFFFF, false);
+                ctx.drawText(client.textRenderer,
+                    dupeActive ? "§a● CALISIYOR" : "§c● DURDU",
+                    ahX, ahY + 70, 0xFFFFFF, false);
+            });
         });
 
-        // ================= 2. TICK =================
+        // ===== 2. TICK =====
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.player == null || client.world == null) return;
 
-            // ── Tuş kontrolleri ──
+            // Tus kontrolleri
             boolean rDown = GLFW.glfwGetKey(client.getWindow().getHandle(), KEY_TOGGLE) == GLFW.GLFW_PRESS;
             if (rDown && !rWasDown) {
                 hudEnabled = !hudEnabled;
                 client.player.sendMessage(
-                    Text.literal(hudEnabled ? "§a[HitX] HUD Açık" : "§c[HitX] HUD Kapalı"), true);
+                    Text.literal(hudEnabled ? "§a[HitX] Target HUD Acik" : "§c[HitX] Target HUD Kapali"), true);
             }
             rWasDown = rDown;
 
@@ -201,67 +171,56 @@ public class HitX implements ClientModInitializer {
             if (nDown && !nWasDown) {
                 nameTagEnabled = !nameTagEnabled;
                 client.player.sendMessage(
-                    Text.literal(nameTagEnabled ? "§a[HitX] Can Barı Açık" : "§c[HitX] Can Barı Kapalı"), true);
+                    Text.literal(nameTagEnabled ? "§a[HitX] Can Bari Acik" : "§c[HitX] Can Bari Kapali"), true);
             }
             nWasDown = nDown;
 
-            // ── Auto-Sprint ──
+            // Auto-Sprint
             if (client.options.forwardKey.isPressed()
                     && !client.player.horizontalCollision
                     && !client.player.isSneaking()
                     && client.player.getHungerManager().getFoodLevel() > 6)
                 client.player.setSprinting(true);
 
-            // ── Fullbright ──
+            // Fullbright
             if (!client.player.hasStatusEffect(StatusEffects.NIGHT_VISION))
                 client.player.addStatusEffect(
                     new StatusEffectInstance(StatusEffects.NIGHT_VISION, 400, 0, false, false, false));
 
-            // ── DUPE Döngüsü ──
-            // Adımlar:
-            //   Step 0: /ah sell <fiyat> gönder → 20 tick bekle
-            //   Step 1: satış onaylandı, /ah cancel ile geri al → 20 tick bekle
-            //   Step 2: döngüyü tekrarla (veya bitir)
+            // Dupe
             if (dupeActive && client.currentScreen == null) {
                 dupeTimer--;
                 if (dupeTimer <= 0) {
                     switch (dupeStep) {
                         case 0 -> {
-                            // Elde bir item var mı kontrol et
                             ItemStack held = client.player.getMainHandStack();
-                            if (!held.isEmpty()) {
-                                client.player.networkHandler.sendChatCommand("ah sell " + dupePrice);
-                                client.player.sendMessage(
-                                    Text.literal("§e/ah sell " + dupePrice + " §7gönderildi"), true);
-                            } else {
+                            if (held.isEmpty()) {
+                                dupeActive = false;
                                 client.player.sendMessage(
                                     Text.literal("§c[HitX] Elde item yok! Dupe durdu."), true);
-                                dupeActive = false;
                                 break;
                             }
-                            dupeTimer = 25; // ~1.25 saniye bekle (sunucu gecikmesi için)
+                            client.player.networkHandler.sendChatCommand("ah sell " + dupePrice);
+                            client.player.sendMessage(
+                                Text.literal("§7>> §e/ah sell " + dupePrice + " §7gonderildi"), true);
+                            dupeTimer = 25;
                             dupeStep  = 1;
                         }
                         case 1 -> {
-                            // /ah cancel ile geri al (dupe efekti — bazı sunucularda item geri gelir)
                             client.player.networkHandler.sendChatCommand("ah cancel");
                             client.player.sendMessage(
-                                Text.literal("§e/ah cancel §7gönderildi"), true);
+                                Text.literal("§7>> §e/ah cancel §7gonderildi"), true);
                             dupeTimer = 20;
                             dupeStep  = 2;
                         }
                         case 2 -> {
-                            // Loop kontrolü
-                            if (dupeLoopCount > 0) {
-                                dupeLoopCount--;
-                                if (dupeLoopCount == 0) {
-                                    dupeActive = false;
-                                    client.player.sendMessage(
-                                        Text.literal("§a[HitX] Dupe tamamlandı!"), true);
-                                    break;
-                                }
+                            dupeLoopCount++;
+                            if (dupeLoopMax > 0 && dupeLoopCount >= dupeLoopMax) {
+                                dupeActive = false;
+                                client.player.sendMessage(
+                                    Text.literal("§a[HitX] Dupe tamamlandi! " + dupeLoopCount + " loop yapildi."), true);
+                                break;
                             }
-                            // Devam et
                             dupeStep  = 0;
                             dupeTimer = 10;
                         }
@@ -269,22 +228,19 @@ public class HitX implements ClientModInitializer {
                 }
             }
 
-            // ── Hedef tespiti ──
+            // Hedef tespiti
             boolean shouldShow = false;
-
             if (client.crosshairTarget instanceof EntityHitResult ehr
                     && ehr.getEntity() instanceof PlayerEntity p && p.isAlive()) {
                 cachedTarget = p;
                 shouldShow   = true;
             }
-
             if (!shouldShow) {
                 Vec3d eye  = client.player.getCameraPosVec(1.0f);
                 Vec3d look = client.player.getRotationVec(1.0f).normalize();
                 Box box = client.player.getBoundingBox().expand(SHOW_RANGE);
                 List<PlayerEntity> nearby = client.world.getEntitiesByClass(
                     PlayerEntity.class, box, e -> e != client.player && e.isAlive());
-
                 PlayerEntity best    = null;
                 double       bestDot = DOT_THRESH;
                 for (PlayerEntity c : nearby) {
@@ -294,15 +250,13 @@ public class HitX implements ClientModInitializer {
                 }
                 if (best != null) { cachedTarget = best; shouldShow = true; }
             }
-
             if (!shouldShow) cachedTarget = null;
-
             hudAlpha = (shouldShow && hudEnabled)
                 ? Math.min(1.0f, hudAlpha + FADE_SPEED)
                 : Math.max(0.0f, hudAlpha - FADE_SPEED);
         });
 
-        // ================= 3. HUD =================
+        // ===== 3. HUD =====
         HudRenderCallback.EVENT.register((drawContext, tickDelta) -> {
             MinecraftClient client = MinecraftClient.getInstance();
             if (client.player == null || client.options.hudHidden) return;
@@ -310,105 +264,78 @@ public class HitX implements ClientModInitializer {
             int sw = client.getWindow().getScaledWidth();
             int sh = client.getWindow().getScaledHeight();
 
-            // ── Sol üst: FPS + mod durumları ──
+            // Sol ust bilgiler
             drawContext.drawText(client.textRenderer,
                 "§aFPS §f" + client.getCurrentFps(), 5, 5, 0xFFFFFF, true);
             drawContext.drawText(client.textRenderer,
-                "§7HUD " + (hudEnabled ? "§a✔" : "§c✘") +
-                " §7[§fR§7]", 5, 14, 0xFFFFFF, false);
+                "§7HUD " + (hudEnabled ? "§a[R]" : "§c[R]"), 5, 14, 0xFFFFFF, false);
             drawContext.drawText(client.textRenderer,
-                "§7Bar " + (nameTagEnabled ? "§a✔" : "§c✘") +
-                " §7[§fN§7]", 5, 23, 0xFFFFFF, false);
+                "§7Bar " + (nameTagEnabled ? "§a[N]" : "§c[N]"), 5, 23, 0xFFFFFF, false);
             if (dupeActive) {
                 drawContext.drawText(client.textRenderer,
-                    "§eDUPE §f" + dupePrice + " §7x" + (dupeLoopCount == 0 ? "∞" : dupeLoopCount),
+                    "§6DUPE §f" + dupePrice + " §7(" + dupeLoopCount
+                        + "/" + (dupeLoopMax == 0 ? "sonsuz" : dupeLoopMax) + ")",
                     5, 32, 0xFFFFFF, true);
             }
 
-            // ── Düşük Can Uyarısı ──
+            // Dusuk can uyarisi
             if (client.player.getHealth() <= 6.0f) {
-                String warn = "⚠ DÜŞÜK CAN ⚠";
+                String warn = "DUSUK CAN";
                 int tw = client.textRenderer.getWidth(warn);
                 drawContext.drawText(client.textRenderer, warn,
-                    (sw / 2) - (tw / 2), (sh / 2) - 30, 0xFF0000, true);
+                    (sw / 2) - (tw / 2), (sh / 2) - 30, 0xFF2222, true);
             }
 
-            // ── Oyuncu üstü can barları (2D projeksiyon) ──
+            // Oyuncu ustu can barlari (2D projeksiyon)
             if (nameTagEnabled && client.world != null) {
                 for (PlayerEntity player : client.world.getPlayers()) {
                     if (player == client.player || !player.isAlive()) continue;
                     double dist = client.player.distanceTo(player);
-                    if (dist > SHOW_RANGE + 1.0) continue; // Reach mesafesi kadar
+                    if (dist > SHOW_RANGE + 0.5) continue;
 
-                    float health    = player.getHealth();
-                    float maxHealth = player.getMaxHealth();
-                    float hpRatio   = Math.max(0f, health / maxHealth);
+                    float hp    = player.getHealth();
+                    float maxHp = player.getMaxHealth();
+                    float ratio = Math.max(0f, hp / maxHp);
 
-                    // 3D → 2D projeksiyon
-                    // Oyuncunun baş üstü pozisyonunu ekran koordinatına çevir
-                    Vec3d worldPos = player.getPos().add(0,
-                        player.getHeight() + 0.3, 0);
+                    Vec3d worldPos = player.getPos().add(0, player.getHeight() + 0.25, 0);
+                    double[] sc = project(client, worldPos, sw, sh);
+                    if (sc == null) continue;
 
-                    // Kamera ve projeksiyon hesabı
-                    net.minecraft.client.render.Camera cam = client.gameRenderer.getCamera();
-                    Vec3d camPos = cam.getPos();
-                    Vec3d rel    = worldPos.subtract(camPos);
+                    int sx   = (int) sc[0];
+                    int sy   = (int) sc[1];
+                    float sz = (float) Math.max(0.4, 1.0 - dist / (SHOW_RANGE + 1.0) * 0.4);
+                    int barW = (int)(48 * sz);
+                    int barH = (int)(4  * sz);
+                    int bx   = sx - barW / 2;
+                    int by   = sy;
+                    int fill = Math.max(1, (int)(ratio * barW));
+                    int col  = hpColor(ratio);
 
-                    // Eğer kameranın arkasındaysa çizme
-                    Vec3d look = client.player.getRotationVec(1.0f);
-                    if (look.dotProduct(rel.normalize()) < 0) continue;
+                    drawContext.fill(bx - 1, by - 1, bx + barW + 1, by + barH + 1, 0xAA000000);
+                    drawContext.fill(bx, by, bx + fill, by + barH, col);
+                    drawContext.fill(bx, by, bx + fill, by + 1, 0x33FFFFFF);
 
-                    // Projeksiyon (basit manuel hesap)
-                    double[] screen2d = worldToScreen(client, worldPos, sw, sh, tickDelta);
-                    if (screen2d == null) continue;
-
-                    int sx = (int) screen2d[0];
-                    int sy = (int) screen2d[1];
-
-                    // Uzaklığa göre boyut küçülsün
-                    float sizeScale = (float) Math.max(0.3, 1.0 - dist / (SHOW_RANGE + 1.0) * 0.5);
-                    int barW  = (int)(50 * sizeScale);
-                    int barH  = (int)(4  * sizeScale);
-                    int barX  = sx - barW / 2;
-                    int barY  = sy - 2;
-                    int fill  = Math.max(1, (int)(hpRatio * barW));
-
-                    // Can rengi
-                    int hpColor = healthColor(hpRatio);
-
-                    // Arka plan
-                    drawContext.fill(barX - 1, barY - 1, barX + barW + 1, barY + barH + 1, 0xAA000000);
-                    // Bar
-                    drawContext.fill(barX, barY, barX + fill, barY + barH, hpColor);
-                    // Parlaklık
-                    drawContext.fill(barX, barY, barX + fill, barY + 1, 0x44FFFFFF);
-
-                    // İsim (küçük)
                     if (dist < SHOW_RANGE) {
-                        String pName = player.getName().getString();
-                        int pw = client.textRenderer.getWidth(pName);
-                        drawContext.drawText(client.textRenderer, pName,
-                            sx - pw / 2, barY - 10, 0xFFFFFF, true);
+                        String pn = player.getName().getString();
+                        int pw = client.textRenderer.getWidth(pn);
+                        drawContext.drawText(client.textRenderer, pn,
+                            sx - pw / 2, by - 10, 0xFFFFFF, true);
                     }
                 }
             }
 
-            // ── Target HUD (sol alt) ──
+            // Target HUD
             if (hudAlpha <= 0.01f || !hudEnabled) return;
-
             PlayerEntity target = cachedTarget;
-            float health    = (target != null) ? target.getHealth()    : 0f;
-            float maxHealth = (target != null) ? target.getMaxHealth() : 20f;
+            float health    = target != null ? target.getHealth()    : 0f;
+            float maxHealth = target != null ? target.getMaxHealth() : 20f;
             int   hpInt     = (int) Math.ceil(health);
-            float hpRatio   = (maxHealth > 0) ? Math.max(0f, health / maxHealth) : 0f;
-
+            float hpRatio   = maxHealth > 0 ? Math.max(0f, health / maxHealth) : 0f;
             int   alpha     = (int)(hudAlpha * 255);
-            int   hpColor   = healthColor(hpRatio);
-            int   hpA       = (alpha << 24) | (hpColor & 0xFFFFFF);
+            int   col       = hpColor(hpRatio);
+            int   hpA       = (alpha << 24) | (col & 0x00FFFFFF);
 
-            int boxW = 155;
-            int boxH = 46;
-            int rad  = 5;
+            int boxW = 155, boxH = 46, rad = 5;
             int boxX = (sw / 2) - 91 - boxW - 4;
             int boxY = sh - boxH - 24;
 
@@ -418,10 +345,68 @@ public class HitX implements ClientModInitializer {
             int bg = (Math.min(alpha, 230) << 24) | 0x0A0A0A;
             drawContext.fill(rad, 0,   boxW - rad, boxH,       bg);
             drawContext.fill(0,   rad, boxW,       boxH - rad, bg);
-            drawContext.fill(rad, 0, boxW - rad, 2, hpA); // Aksent çizgisi
+            drawContext.fill(rad, 0, boxW - rad, 2, hpA);
 
-            // Kafa
             if (target != null) {
                 try {
                     Identifier skin = client.getSkinProvider()
-                        .getSkinTextures(target.getGam
+                        .getSkinTextures(target.getGameProfile()).texture();
+                    int hx = 6, hy = (boxH - 20) / 2;
+                    drawContext.fill(hx - 1, hy - 1, hx + 21, hy + 21,
+                        (Math.min(alpha, 100) << 24) | 0x000000);
+                    drawContext.drawTexture(skin, hx, hy, 20, 20, 8,  8, 8, 8, 64, 64);
+                    drawContext.drawTexture(skin, hx, hy, 20, 20, 40, 8, 8, 8, 64, 64);
+                } catch (Exception ignored) {}
+            }
+
+            int tx = 32;
+            drawContext.drawText(client.textRenderer, "TARGET",
+                tx, 4, (Math.min(alpha, 180) << 24) | 0x88BBFF, false);
+            drawContext.drawText(client.textRenderer,
+                target != null ? target.getName().getString() : "---",
+                tx, 13, (alpha << 24) | 0xFFFFFF, true);
+
+            String hpStr = hpInt + " H";
+            int hpW = client.textRenderer.getWidth(hpStr);
+            drawContext.drawText(client.textRenderer, hpStr,
+                boxW - hpW - 6, 13, hpA, true);
+
+            int barX = tx, barY = 29, barW = boxW - tx - 6, barH = 7;
+            int fill  = Math.max(1, (int)(hpRatio * barW));
+            drawContext.fill(barX, barY, barX + barW, barY + barH,
+                (Math.min(alpha, 200) << 24) | 0x1A1A1A);
+            drawContext.fill(barX, barY, barX + fill, barY + barH, hpA);
+            drawContext.fill(barX, barY, barX + fill, barY + 2,
+                (Math.min(alpha / 4, 50) << 24) | 0xFFFFFF);
+
+            drawContext.getMatrices().pop();
+        });
+    }
+
+    // 3D -> 2D projeksiyon
+    private double[] project(MinecraftClient client, Vec3d world, int sw, int sh) {
+        try {
+            net.minecraft.client.render.Camera cam = client.gameRenderer.getCamera();
+            Vec3d rel = world.subtract(cam.getPos());
+            Vec3d look = client.player.getRotationVec(1.0f);
+            if (look.dotProduct(rel.normalize()) < 0) return null;
+
+            float yaw   = cam.getYaw();
+            float pitch = cam.getPitch();
+            double yr = Math.toRadians(yaw);
+            double pr = Math.toRadians(pitch);
+
+            double rx  =  rel.x * Math.cos(yr) - rel.z * Math.sin(yr);
+            double ry  =  rel.y;
+            double rz  =  rel.x * Math.sin(yr) + rel.z * Math.cos(yr);
+            double ry2 =  ry * Math.cos(pr) - rz * Math.sin(pr);
+            double rz2 =  ry * Math.sin(pr) + rz * Math.cos(pr);
+
+            if (rz2 <= 0.05) return null;
+
+            double fov  = Math.toRadians(client.options.getFov().getValue());
+            double proj = sw / (2.0 * Math.tan(fov / 2.0));
+            double sx   = (sw / 2.0) + (rx  / rz2) * proj;
+            double sy   = (sh / 2.0) - (ry2 / rz2) * proj;
+
+            if (sx < -100 || sx > sw + 100 || sy < -100 || sy
