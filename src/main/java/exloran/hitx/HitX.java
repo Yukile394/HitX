@@ -20,10 +20,7 @@ import net.minecraft.item.Items;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
-import net.minecraft.util.hit.EntityHitResult;
-import net.minecraft.util.math.Vec3d;
-import org.lwjgl.glfw.GLFW;
-import java.util.List;
+import net.minecraft.
 
 public class HitX implements ClientModInitializer {
 
