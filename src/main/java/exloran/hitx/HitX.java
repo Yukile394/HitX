@@ -41,7 +41,6 @@ public class HitX implements ClientModInitializer {
 
         ScreenEvents.AFTER_INIT.register((client, screen, W, H) -> {
             
-            // Sandık veya Sunucu Menüsü (Siparişler vb.)
             if (screen instanceof GenericContainerScreen chest) {
                 int sx = W / 2 + 92, sy = H / 2 - 80, id = chest.getScreenHandler().syncId;
                 btn(screen, "Herseyi Al", sx, sy, 85, 20, b -> { int s = chest.getScreenHandler().getInventory().size(); for (int i = 0; i < s; i++) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player); });
@@ -49,17 +48,14 @@ public class HitX implements ClientModInitializer {
                 btn(screen, "Herseyi At", sx, sy + 48, 85, 20, b -> { for (int i = 0; i < chest.getScreenHandler().slots.size(); i++) client.interactionManager.clickSlot(id, i, 1, SlotActionType.THROW, client.player); });
                 btn(screen, "Cop At", sx, sy + 72, 85, 20, b -> { for (int i = 0; i < chest.getScreenHandler().slots.size(); i++) { ItemStack st = chest.getScreenHandler().getSlot(i).getStack(); if (isTrash(st)) client.interactionManager.clickSlot(id, i, 1, SlotActionType.THROW, client.player); } });
                 
-                // YENİ BUTON: Sol Üste Eklenen Delayli Oto Order Butonu
                 btn(screen, "Order Oto", 5, 5, 65, 20, b -> startAutoOrder(client));
             }
             
-            // Kendi Envanterin
             if (screen instanceof InventoryScreen inv) {
                 int x = W / 2 - 88, y = H / 2 - 83, id = inv.getScreenHandler().syncId;
                 btn(screen, "Zirhi Giy", x - 52, y, 50, 18, b -> { for (int i = 9; i < 45; i++) { ItemStack st = inv.getScreenHandler().getSlot(i).getStack(); if (isArmor(st)) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player); } });
                 btn(screen, "Temizle", x - 52, y + 20, 50, 18, b -> { for (int i = 9; i < 45; i++) client.interactionManager.clickSlot(id, i, 1, SlotActionType.THROW, client.player); });
                 
-                // YENİ BUTON: Kendi envanterinde de sol üstte görünsün
                 btn(screen, "Order Oto", 5, 5, 65, 20, b -> startAutoOrder(client));
             }
         });
@@ -169,38 +165,46 @@ public class HitX implements ClientModInitializer {
         });
     }
 
-    // --- OTO ORDER YARDIMCI METODU ---
+    // --- DUPE DENEME & OTO ORDER METODU ---
     private void startAutoOrder(MinecraftClient client) {
         if (client.player == null) return;
         
-        // İşlemin başladığını chate yaz (pembe renk ile)
-        client.player.sendMessage(Text.literal("§d[HitX] §fOto Order Başlatıldı!"), false);
+        client.player.sendMessage(Text.literal("§d[HitX] §f/order Dupe Testi Başlatıldı!"), false);
 
-        // Arayüz dondurmamak için işlemleri ayrı bir Thread(İş Parçacığı) üzerinde yapıyoruz.
         new Thread(() -> {
             try {
-                // 1. Adım: Eğer siparişe önce menüden tıklanması gerekiyorsa bu kodu açabilirsin.
-                // Şu an sadece senin envanterindeki eşyaları sandığa/menüye shiftliyor.
+                // 1. Aşama: /order komutunu gönder
+                client.execute(() -> {
+                    if (client.getNetworkHandler() != null) {
+                        // Eğer sürümünden dolayı bu hata verirse, .sendCommand("order") yerine 
+                        // .sendChatMessage("/order") kullanabilirsin.
+                        client.getNetworkHandler().sendCommand("order");
+                    }
+                });
                 
-                // GECİKME (Delay) - Oyunun menü yüklenmesini beklemesi için milisaniye
-                Thread.sleep(300); // 300 ms delay (sunucu yavaşsa 500-600 yapabilirsin)
+                // GECİKME: Menünün açılması için sunucudan gelecek paketi bekle (Milisaniye)
+                // Eğer sunucuda lag varsa bunu 600-800 yapabilirsin. Çok hızlıysa 200'e çek.
+                Thread.sleep(400); 
                 
-                // 2. Adım: Menüdeki işlemi yap
+                // 2. Aşama: Açılan menüde eşyalara spam tıklama gönder (Dupe tetiklemek için)
                 client.execute(() -> {
                     if (client.currentScreen instanceof GenericContainerScreen chest) {
                         int syncId = chest.getScreenHandler().syncId;
-                        int containerSize = chest.getScreenHandler().getInventory().size(); // Sandığın boyutu
-                        int totalSlots = chest.getScreenHandler().slots.size(); // Toplam boyut (Sandık + Senin Envanterin)
+                        int totalSlots = chest.getScreenHandler().slots.size();
                         
-                        // Sadece senin envanterindeki kısımları döngüye al
-                        for (int i = containerSize; i < totalSlots; i++) {
-                            ItemStack stack = chest.getScreenHandler().getSlot(i).getStack();
-                            
-                            // Eğer slottaki eşya boş değilse hızlıca (Shift-Click) gönder
-                            if (!stack.isEmpty() && !isArmor(stack)) { 
-                                client.interactionManager.clickSlot(syncId, i, 0, SlotActionType.QUICK_MOVE, client.player);
+                        // Aynı tick içinde işlemleri 4 kere tekrarlıyoruz (Spam)
+                        for (int k = 0; k < 4; k++) { 
+                            for (int i = 0; i < totalSlots; i++) {
+                                ItemStack stack = chest.getScreenHandler().getSlot(i).getStack();
+                                // Zırh hariç eşyalara hızlıca shift-click gönder
+                                if (!stack.isEmpty() && !isArmor(stack)) { 
+                                    client.interactionManager.clickSlot(syncId, i, 0, SlotActionType.QUICK_MOVE, client.player);
+                                }
                             }
                         }
+                        client.player.sendMessage(Text.literal("§d[HitX] §fSpam tıklamalar gönderildi!"), false);
+                    } else {
+                        client.player.sendMessage(Text.literal("§c[HitX] §fMenü açılamadı, gecikmeyi (Thread.sleep) artırın!"), false);
                     }
                 });
                 
