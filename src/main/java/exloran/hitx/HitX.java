@@ -1,4 +1,4 @@
-package com.exloran.hitx;
+package exloran.hitx;
 
 import me.shedaniel.autoconfig.AutoConfig;
 import me.shedaniel.autoconfig.serializer.GsonConfigSerializer;
@@ -422,4 +422,4 @@ public class HitX implements ClientModInitializer {
             if (rz2 <= 0.1) return null;
 
             double fov = Math.toRadians(mc.options.getFov().getValue());
-         
+            d
