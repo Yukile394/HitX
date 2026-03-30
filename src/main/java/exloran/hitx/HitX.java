@@ -40,17 +40,27 @@ public class HitX implements ClientModInitializer {
         AutoConfig.register(HitXConfig.class, GsonConfigSerializer::new);
 
         ScreenEvents.AFTER_INIT.register((client, screen, W, H) -> {
+            
+            // Sandık veya Sunucu Menüsü (Siparişler vb.)
             if (screen instanceof GenericContainerScreen chest) {
                 int sx = W / 2 + 92, sy = H / 2 - 80, id = chest.getScreenHandler().syncId;
                 btn(screen, "Herseyi Al", sx, sy, 85, 20, b -> { int s = chest.getScreenHandler().getInventory().size(); for (int i = 0; i < s; i++) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player); });
                 btn(screen, "Herseyi Koy", sx, sy + 24, 85, 20, b -> { int s = chest.getScreenHandler().getInventory().size(); for (int i = s; i < s + 36; i++) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player); });
                 btn(screen, "Herseyi At", sx, sy + 48, 85, 20, b -> { for (int i = 0; i < chest.getScreenHandler().slots.size(); i++) client.interactionManager.clickSlot(id, i, 1, SlotActionType.THROW, client.player); });
                 btn(screen, "Cop At", sx, sy + 72, 85, 20, b -> { for (int i = 0; i < chest.getScreenHandler().slots.size(); i++) { ItemStack st = chest.getScreenHandler().getSlot(i).getStack(); if (isTrash(st)) client.interactionManager.clickSlot(id, i, 1, SlotActionType.THROW, client.player); } });
+                
+                // YENİ BUTON: Sol Üste Eklenen Delayli Oto Order Butonu
+                btn(screen, "Order Oto", 5, 5, 65, 20, b -> startAutoOrder(client));
             }
+            
+            // Kendi Envanterin
             if (screen instanceof InventoryScreen inv) {
                 int x = W / 2 - 88, y = H / 2 - 83, id = inv.getScreenHandler().syncId;
                 btn(screen, "Zirhi Giy", x - 52, y, 50, 18, b -> { for (int i = 9; i < 45; i++) { ItemStack st = inv.getScreenHandler().getSlot(i).getStack(); if (isArmor(st)) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player); } });
                 btn(screen, "Temizle", x - 52, y + 20, 50, 18, b -> { for (int i = 9; i < 45; i++) client.interactionManager.clickSlot(id, i, 1, SlotActionType.THROW, client.player); });
+                
+                // YENİ BUTON: Kendi envanterinde de sol üstte görünsün
+                btn(screen, "Order Oto", 5, 5, 65, 20, b -> startAutoOrder(client));
             }
         });
 
@@ -91,16 +101,13 @@ public class HitX implements ClientModInitializer {
             int sw = mc.getWindow().getScaledWidth(), sh = mc.getWindow().getScaledHeight();
             float delta = tickCounter.getTickDelta(true);
 
-            // Dinamik RGB Flop Renkleri
             int flopColorMain = getPinkWhiteFlop(0, 1.0f);
             int flopColorSec = getPinkWhiteFlop(150, 1.0f);
 
-            // FPS ve Durum Yazıları
             ctx.drawText(mc.textRenderer, "FPS " + mc.getCurrentFps(), 5, 5, flopColorMain, true);
             ctx.drawText(mc.textRenderer, "HUD " + (hudOn ? "Acik" : "Kapali") + " [R]", 5, 14, flopColorSec, true);
             ctx.drawText(mc.textRenderer, "Bar " + (tagOn ? "Acik" : "Kapali") + " [N]", 5, 23, getPinkWhiteFlop(300, 1.0f), true);
 
-            // Oyuncu Üstü Sabit Bar
             if (tagOn && mc.world != null) {
                 for (PlayerEntity pl : mc.world.getPlayers()) {
                     if (pl == mc.player || !pl.isAlive()) continue;
@@ -118,7 +125,7 @@ public class HitX implements ClientModInitializer {
                     int px = (int) sc[0], py = (int) sc[1], bw = (int) (50 * (1.0 - dist / (RANGE + 2) * 0.3)), bh = 4;
                     int bx = px - bw / 2, fill = Math.max(1, (int) (r * bw));
                     
-                    int tagFlop = getPinkWhiteFlop((int)(pl.getId() * 50), 1.0f); // Oyuncuya özel hafif kayma
+                    int tagFlop = getPinkWhiteFlop((int)(pl.getId() * 50), 1.0f); 
                     
                     ctx.fill(bx - 1, py - 1, bx + bw + 1, py + bh + 1, 0xAA000000);
                     ctx.fill(bx, py, bx + fill, py + bh, tagFlop);
@@ -129,11 +136,10 @@ public class HitX implements ClientModInitializer {
                 }
             }
 
-            // Can HUD (Büyütme/Küçültme ve Konumlandırma)
             if (alpha <= 0.01f || !hudOn) return;
             float hp = target != null ? target.getHealth() : 0f, mhp = target != null ? target.getMaxHealth() : 20f, r = Math.max(0f, hp / mhp);
             int a = (int) (alpha * 255);
-            int hpA = getPinkWhiteFlop(0, alpha); // Barlar ve yazılar için alfa destekli flop
+            int hpA = getPinkWhiteFlop(0, alpha);
             int bW = 155, bH = 46;
             
             int bX = (sw * config.hudX) / 100 - (bW / 2);
@@ -163,14 +169,54 @@ public class HitX implements ClientModInitializer {
         });
     }
 
+    // --- OTO ORDER YARDIMCI METODU ---
+    private void startAutoOrder(MinecraftClient client) {
+        if (client.player == null) return;
+        
+        // İşlemin başladığını chate yaz (pembe renk ile)
+        client.player.sendMessage(Text.literal("§d[HitX] §fOto Order Başlatıldı!"), false);
+
+        // Arayüz dondurmamak için işlemleri ayrı bir Thread(İş Parçacığı) üzerinde yapıyoruz.
+        new Thread(() -> {
+            try {
+                // 1. Adım: Eğer siparişe önce menüden tıklanması gerekiyorsa bu kodu açabilirsin.
+                // Şu an sadece senin envanterindeki eşyaları sandığa/menüye shiftliyor.
+                
+                // GECİKME (Delay) - Oyunun menü yüklenmesini beklemesi için milisaniye
+                Thread.sleep(300); // 300 ms delay (sunucu yavaşsa 500-600 yapabilirsin)
+                
+                // 2. Adım: Menüdeki işlemi yap
+                client.execute(() -> {
+                    if (client.currentScreen instanceof GenericContainerScreen chest) {
+                        int syncId = chest.getScreenHandler().syncId;
+                        int containerSize = chest.getScreenHandler().getInventory().size(); // Sandığın boyutu
+                        int totalSlots = chest.getScreenHandler().slots.size(); // Toplam boyut (Sandık + Senin Envanterin)
+                        
+                        // Sadece senin envanterindeki kısımları döngüye al
+                        for (int i = containerSize; i < totalSlots; i++) {
+                            ItemStack stack = chest.getScreenHandler().getSlot(i).getStack();
+                            
+                            // Eğer slottaki eşya boş değilse hızlıca (Shift-Click) gönder
+                            if (!stack.isEmpty() && !isArmor(stack)) { 
+                                client.interactionManager.clickSlot(syncId, i, 0, SlotActionType.QUICK_MOVE, client.player);
+                            }
+                        }
+                    }
+                });
+                
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }).start();
+    }
+
     // --- YARDIMCI METOTLAR ---
 
-    // Pembe-Beyaz (Pink-White Flop) animasyonunu sağlayan dinamik renk metodu
     private int getPinkWhiteFlop(int offset, float alphaMult) {
-        double wave = (Math.sin((System.currentTimeMillis() + offset) / 300.0) + 1.0) / 2.0; // 0.0 ile 1.0 arası dalga
+        double wave = (Math.sin((System.currentTimeMillis() + offset) / 300.0) + 1.0) / 2.0; 
         int a = (int) (255 * alphaMult);
         int r = 255;
-        int g = (int) (130 + (125 * wave)); // Pembe ile Beyaz arası gidip gelir
+        int g = (int) (130 + (125 * wave)); 
         int b = (int) (200 + (55 * wave));
         return (a << 24) | (r << 16) | (g << 8) | b;
     }
