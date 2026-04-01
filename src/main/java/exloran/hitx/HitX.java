@@ -64,7 +64,6 @@ public class HitX implements ClientModInitializer {
             if (client.player == null || client.world == null) return;
             HitXConfig config = AutoConfig.getConfigHolder(HitXConfig.class).getConfig();
 
-            // Kontroller
             boolean r = GLFW.glfwGetKey(client.getWindow().getHandle(), GLFW.GLFW_KEY_R) == GLFW.GLFW_PRESS;
             if (r && !rLast) { hudOn = !hudOn; client.player.sendMessage(Text.literal(hudOn ? "§dHUD Açıldı" : "§fHUD Kapatıldı"), true); }
             rLast = r;
@@ -77,13 +76,11 @@ public class HitX implements ClientModInitializer {
             if (p && !pLast) { config.particleOn = !config.particleOn; client.player.sendMessage(Text.literal(config.particleOn ? "§dPartiküller Açıldı" : "§fPartiküller Kapatıldı"), true); }
             pLast = p;
 
-            // Otomatik Sprint ve Gece Görüşü
             if (client.options.forwardKey.isPressed() && !client.player.horizontalCollision && !client.player.isSneaking() && client.player.getHungerManager().getFoodLevel() > 6)
                 client.player.setSprinting(true);
             if (!client.player.hasStatusEffect(StatusEffects.NIGHT_VISION))
                 client.player.addStatusEffect(new StatusEffectInstance(StatusEffects.NIGHT_VISION, 400, 0, false, false, false));
 
-            // Hedef Belirleme
             boolean show = false;
             if (client.crosshairTarget instanceof EntityHitResult e && e.getEntity() instanceof PlayerEntity pl && pl.isAlive()) { target = pl; show = true; }
             if (!show) {
@@ -96,7 +93,6 @@ public class HitX implements ClientModInitializer {
             if (!show) target = null;
             alpha = show && hudOn ? Math.min(1f, alpha + FADE) : Math.max(0f, alpha - FADE);
 
-            // Gelişmiş Partikül Üretimi
             if (config.particleOn && hudOn && target != null && alpha > 0.1f) {
                 if (client.world.random.nextFloat() < 0.3f) {
                     particles.add(new TargetParticle(client.world.random.nextFloat() * 155, client.world.random.nextFloat() * 46));
@@ -119,13 +115,15 @@ public class HitX implements ClientModInitializer {
 
             renderPadejHotbar(ctx, mc, sw, sh, delta, flop);
 
-            // Can Barı (NameTag)
             if (tagOn && mc.world != null) {
                 for (PlayerEntity pl : mc.world.getPlayers()) {
                     if (pl == mc.player || !pl.isAlive()) continue;
                     double dist = mc.player.distanceTo(pl);
                     if (dist > RANGE + 1) continue;
-                    double wx = lerp(pl.lastRenderX, pl.getX(), delta), wy = lerp(pl.lastRenderY, pl.getY(), delta), wz = lerp(pl.lastRenderZ, pl.getZ(), delta);
+                    // Hata buradaydı: Metotlar double alacak şekilde güncellendi
+                    double wx = lerp(pl.lastRenderX, pl.getX(), delta);
+                    double wy = lerp(pl.lastRenderY, pl.getY(), delta);
+                    double wz = lerp(pl.lastRenderZ, pl.getZ(), delta);
                     double[] sc = proj(mc, new Vec3d(wx, wy + pl.getHeight() + 0.3, wz), sw, sh);
                     if (sc != null) {
                         int bx = (int) sc[0] - 20, py = (int) sc[1], bw = 40;
@@ -136,7 +134,6 @@ public class HitX implements ClientModInitializer {
                 }
             }
 
-            // Target HUD
             if (alpha <= 0.01f || !hudOn) return;
             int bW = 155, bH = 46, bX = (sw * config.hudX) / 100 - bW / 2, bY = (sh * config.hudY) / 100 - bH / 2;
             int hpColor = getPinkWhiteFlop(0, alpha);
@@ -167,11 +164,9 @@ public class HitX implements ClientModInitializer {
     private void renderPadejHotbar(DrawContext ctx, MinecraftClient mc, int sw, int sh, float delta, int flop) {
         PlayerInventory inv = mc.player.getInventory();
         int w = 182, h = 22, x = (sw - w) / 2, y = sh - 25;
-        selectItemX = lerp(selectItemX, inv.selectedSlot * 20, delta * 0.25f);
+        selectItemX = lerp(selectItemX, inv.selectedSlot * 20f, delta * 0.25f);
         
-        // Arka Plan Blur Görünümü
         ctx.fill(x - 2, y - 2, x + w + 2, y + h + 2, 0x88000000);
-        // Seçili Slot Çerçevesi
         int sx = (int)(x + selectItemX);
         ctx.fill(sx, y, sx + 22, y + 22, applyAlpha(flop, 120));
         ctx.fill(sx, y, sx + 22, y + 1, flop);
@@ -200,6 +195,10 @@ public class HitX implements ClientModInitializer {
         }
     }
 
+    // Overloaded lerp methods to prevent compilation errors
+    private float lerp(float a, float b, float t) { return a + (b - a) * t; }
+    private double lerp(double a, double b, float t) { return a + (b - a) * t; }
+
     private int getHealthColor(float r, long n, int s) {
         if (r > 0.6f) return 0xFF000000 | ((int)(255 * (1f - (r - 0.6f) / 0.4f)) << 16) | (0xCC << 8) | 0x44;
         return 0xFF000000 | (0xFF << 16) | ((int)(100 + 100 * (r / 0.6f)) << 8) | 0x22;
@@ -225,7 +224,6 @@ public class HitX implements ClientModInitializer {
         } catch (Exception e) { return null; }
     }
 
-    private float lerp(float a, float b, float t) { return a + (b - a) * t; }
     private void btn(Screen s, String t, int x, int y, int w, int h, ButtonWidget.PressAction a) { Screens.getButtons(s).add(ButtonWidget.builder(Text.literal(t), a).dimensions(x, y, w, h).build()); }
     private boolean isTrash(ItemStack s) { return s.isOf(Items.ROTTEN_FLESH) || s.isOf(Items.DIRT) || s.isOf(Items.COBBLESTONE); }
     private boolean isArmor(ItemStack s) { String n = s.getItem().toString().toLowerCase(); return n.contains("helmet") || n.contains("chestplate") || n.contains("leggings") || n.contains("boots"); }
