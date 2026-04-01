@@ -19,6 +19,10 @@ public class HitXConfig implements ConfigData {
     @ConfigEntry.BoundedDiscrete(min = 50, max = 200)
     public int hudScale = 100; // HUD Boyutu (%)
 
+    @ConfigEntry.Category("hud")
+    @ConfigEntry.Gui.Tooltip(count = 1)
+    public boolean particleOn = true; // EKLENDİ: Partiküller açık/kapalı
+
     @ConfigEntry.Gui.CollapsibleObject
     public Visuals visuals = new Visuals();
 
