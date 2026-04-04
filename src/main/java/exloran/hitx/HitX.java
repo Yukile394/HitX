@@ -12,6 +12,7 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.ingame.GenericContainerScreen;
 import net.minecraft.client.gui.screen.ingame.InventoryScreen;
+import net.minecraft.client.gui.tooltip.Tooltip;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.entity.effect.StatusEffectInstance;
 import net.minecraft.entity.effect.StatusEffects;
@@ -48,15 +49,17 @@ public class HitX implements ClientModInitializer {
         ScreenEvents.AFTER_INIT.register((client, screen, W, H) -> {
             if (screen instanceof GenericContainerScreen chest) {
                 int sx = W / 2 + 92, sy = H / 2 - 80, id = chest.getScreenHandler().syncId;
-                btn(screen, "Herseyi Al", sx, sy, 85, 20, b -> { int s = chest.getScreenHandler().getInventory().size(); for (int i = 0; i < s; i++) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player); });
-                btn(screen, "Herseyi Koy", sx, sy + 24, 85, 20, b -> { int s = chest.getScreenHandler().getInventory().size(); for (int i = s; i < s + 36; i++) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player); });
-                btn(screen, "Herseyi At", sx, sy + 48, 85, 20, b -> { for (int i = 0; i < chest.getScreenHandler().slots.size(); i++) client.interactionManager.clickSlot(id, i, 1, SlotActionType.THROW, client.player); });
-                btn(screen, "Cop At", sx, sy + 72, 85, 20, b -> { for (int i = 0; i < chest.getScreenHandler().slots.size(); i++) { ItemStack st = chest.getScreenHandler().getSlot(i).getStack(); if (isTrash(st)) client.interactionManager.clickSlot(id, i, 1, SlotActionType.THROW, client.player); } });
+                // Görselli, yuvarlak köşeli ve Flop animasyonlu butonlar
+                iconBtn(screen, new ItemStack(Items.HOPPER), "Herşeyi Al", sx, sy, 24, 20, b -> { int s = chest.getScreenHandler().getInventory().size(); for (int i = 0; i < s; i++) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player); });
+                iconBtn(screen, new ItemStack(Items.CHEST), "Herşeyi Koy", sx, sy + 24, 24, 20, b -> { int s = chest.getScreenHandler().getInventory().size(); for (int i = s; i < s + 36; i++) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player); });
+                iconBtn(screen, new ItemStack(Items.DROPPER), "Herşeyi At", sx, sy + 48, 24, 20, b -> { for (int i = 0; i < chest.getScreenHandler().slots.size(); i++) client.interactionManager.clickSlot(id, i, 1, SlotActionType.THROW, client.player); });
+                iconBtn(screen, new ItemStack(Items.LAVA_BUCKET), "Çöpleri At", sx, sy + 72, 24, 20, b -> { for (int i = 0; i < chest.getScreenHandler().slots.size(); i++) { ItemStack st = chest.getScreenHandler().getSlot(i).getStack(); if (isTrash(st)) client.interactionManager.clickSlot(id, i, 1, SlotActionType.THROW, client.player); } });
             }
             if (screen instanceof InventoryScreen inv) {
-                int x = W / 2 - 88, y = H / 2 - 83, id = inv.getScreenHandler().syncId;
-                btn(screen, "Zirhi Giy", x - 52, y, 50, 18, b -> { for (int i = 9; i < 45; i++) { ItemStack st = inv.getScreenHandler().getSlot(i).getStack(); if (isArmor(st)) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player); } });
-                btn(screen, "Temizle", x - 52, y + 20, 50, 18, b -> { for (int i = 9; i < 45; i++) client.interactionManager.clickSlot(id, i, 1, SlotActionType.THROW, client.player); });
+                int x = W / 2 - 25, y = H / 2 - 83, id = inv.getScreenHandler().syncId;
+                // Envanter ekranı için yan yana görselli butonlar
+                iconBtn(screen, new ItemStack(Items.DIAMOND_CHESTPLATE), "Zırhı Giy", x, y, 24, 20, b -> { for (int i = 9; i < 45; i++) { ItemStack st = inv.getScreenHandler().getSlot(i).getStack(); if (isArmor(st)) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player); } });
+                iconBtn(screen, new ItemStack(Items.SPONGE), "Temizle", x + 28, y, 24, 20, b -> { for (int i = 9; i < 45; i++) client.interactionManager.clickSlot(id, i, 1, SlotActionType.THROW, client.player); });
             }
         });
 
@@ -120,7 +123,6 @@ public class HitX implements ClientModInitializer {
                     if (pl == mc.player || !pl.isAlive()) continue;
                     double dist = mc.player.distanceTo(pl);
                     if (dist > RANGE + 1) continue;
-                    // Hata buradaydı: Metotlar double alacak şekilde güncellendi
                     double wx = lerp(pl.lastRenderX, pl.getX(), delta);
                     double wy = lerp(pl.lastRenderY, pl.getY(), delta);
                     double wz = lerp(pl.lastRenderZ, pl.getZ(), delta);
@@ -180,6 +182,49 @@ public class HitX implements ClientModInitializer {
         }
     }
 
+    // --- ÖZEL İKON BUTONU SINIFI (Görseldeki tasarımı uygular) ---
+    private static class FlopIconButton extends ButtonWidget {
+        private final ItemStack icon;
+
+        public FlopIconButton(int x, int y, int width, int height, ItemStack icon, String tooltipStr, PressAction onPress) {
+            super(x, y, width, height, Text.literal(tooltipStr), onPress, DEFAULT_NARRATION_SUPPLIER);
+            this.icon = icon;
+            this.setTooltip(Tooltip.of(Text.literal(tooltipStr)));
+        }
+
+        @Override
+        public void renderWidget(DrawContext ctx, int mouseX, int mouseY, float delta) {
+            // Animasyonlu Flop rengini al, fare üzerine gelince biraz daha parlak yap
+            int flopColor = getPinkWhiteFlop(this.isHovered() ? 0 : 300, 1.0f);
+            
+            int x = this.getX();
+            int y = this.getY();
+            int w = this.getWidth();
+            int h = this.getHeight();
+
+            // Gönderdiğin görseldeki gibi koyu, mat arka plan
+            int bg = 0xFF222222; 
+            ctx.fill(x + 2, y, x + w - 2, y + h, bg);
+            ctx.fill(x, y + 2, x + w, y + h - 2, bg);
+            ctx.fill(x + 1, y + 1, x + w - 1, y + h - 1, bg);
+
+            // Pembe-Beyaz Flop Animasyonlu Kenarlık (Dış Yapı - Köşeleri Yuvarlatılmış)
+            ctx.fill(x + 2, y, x + w - 2, y + 1, flopColor); // Üst Çizgi
+            ctx.fill(x + 2, y + h - 1, x + w - 2, y + h, flopColor); // Alt Çizgi
+            ctx.fill(x, y + 2, x + 1, y + h - 2, flopColor); // Sol Çizgi
+            ctx.fill(x + w - 1, y + 2, x + w, y + h - 2, flopColor); // Sağ Çizgi
+            
+            // Kenar Yumuşatma Noktaları (Oval Hap görünümü için)
+            ctx.fill(x + 1, y + 1, x + 2, y + 2, flopColor);
+            ctx.fill(x + w - 2, y + 1, x + w - 1, y + 2, flopColor);
+            ctx.fill(x + 1, y + h - 2, x + 2, y + h - 1, flopColor);
+            ctx.fill(x + w - 2, y + h - 2, x + w - 1, y + h - 1, flopColor);
+
+            // İkonu tam merkeze oturtarak çiz
+            ctx.drawItem(this.icon, x + (w - 16) / 2, y + (h - 16) / 2);
+        }
+    }
+
     public static class TargetParticle {
         float x, y, mx, my, age, maxAge;
         public TargetParticle(float x, float y) { 
@@ -195,7 +240,6 @@ public class HitX implements ClientModInitializer {
         }
     }
 
-    // Overloaded lerp methods to prevent compilation errors
     private float lerp(float a, float b, float t) { return a + (b - a) * t; }
     private double lerp(double a, double b, float t) { return a + (b - a) * t; }
 
@@ -204,7 +248,8 @@ public class HitX implements ClientModInitializer {
         return 0xFF000000 | (0xFF << 16) | ((int)(100 + 100 * (r / 0.6f)) << 8) | 0x22;
     }
 
-    private int getPinkWhiteFlop(int o, float a) {
+    // Metodu static yaptık ki buton sınıfından ulaşılabilsin
+    public static int getPinkWhiteFlop(int o, float a) {
         double w = (Math.sin((System.currentTimeMillis() + o) / 300.0) + 1.0) / 2.0;
         return ((int)(255 * a) << 24) | (0xFF << 16) | ((int)(130 + 125 * w) << 8) | (int)(200 + 55 * w);
     }
@@ -224,7 +269,12 @@ public class HitX implements ClientModInitializer {
         } catch (Exception e) { return null; }
     }
 
-    private void btn(Screen s, String t, int x, int y, int w, int h, ButtonWidget.PressAction a) { Screens.getButtons(s).add(ButtonWidget.builder(Text.literal(t), a).dimensions(x, y, w, h).build()); }
+    // Yeni buton ekleme metodumuz
+    private void iconBtn(Screen s, ItemStack icon, String t, int x, int y, int w, int h, ButtonWidget.PressAction a) {
+        Screens.getButtons(s).add(new FlopIconButton(x, y, w, h, icon, t, a));
+    }
+    
     private boolean isTrash(ItemStack s) { return s.isOf(Items.ROTTEN_FLESH) || s.isOf(Items.DIRT) || s.isOf(Items.COBBLESTONE); }
     private boolean isArmor(ItemStack s) { String n = s.getItem().toString().toLowerCase(); return n.contains("helmet") || n.contains("chestplate") || n.contains("leggings") || n.contains("boots"); }
-}
+                    }
+                                                                                    
