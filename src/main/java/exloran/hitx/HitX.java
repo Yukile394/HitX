@@ -18,6 +18,7 @@ import net.minecraft.entity.effect.StatusEffectInstance;
 import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.item.ArmorItem;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.screen.slot.SlotActionType;
@@ -28,253 +29,397 @@ import net.minecraft.util.math.Vec3d;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 
 public class HitX implements ClientModInitializer {
 
-    private boolean hudOn = true, tagOn = true;
-    private PlayerEntity target = null;
-    private float alpha = 0f;
-    private boolean rLast = false, nLast = false, pLast = false;
-    private static final double RANGE = 6.5, DOT = 0.97;
-    private static final float FADE = 0.12f;
+    // ─── Durum ────────────────────────────────────────────────────────────────
+    private boolean hudOn    = true;
+    private boolean tagOn    = true;
+    private boolean kbOn     = true;   // YENİ: Özel hotbar aç/kapat [H]
 
-    private float selectItemX = 0f;
+    private PlayerEntity target    = null;
+    private float        alpha     = 0f;
+    private float        selectItemX = 0f;
+
+    // YENİ: Hedef kilitlenme efekti için ekstra alpha pulse
+    private float lockPulse = 0f;
+    private boolean lockPulseDir = true;
+
+    // YENİ: Kombo sayacı — her hedef bulunduğunda artar, hedef kaybolunca sıfırlanır
+    private int   comboCount     = 0;
+    private float comboAlpha     = 0f;
+    private long  lastTargetTime = 0;
+
+    // YENİ: Ping göstergesi için geçmiş FPS tamponu
+    private final int[]  fpsHistory   = new int[60];
+    private int          fpsHistoryIdx = 0;
+
+    // ─── Tuş geçmiş durumları ─────────────────────────────────────────────────
+    private boolean rLast = false, nLast = false, pLast = false, hLast = false;
+
+    // ─── Sabitler ─────────────────────────────────────────────────────────────
+    private static final double RANGE = 6.5;
+    private static final double DOT   = 0.97;
+    private static final float  FADE  = 0.12f;
+
+    // ─── Partiküller ──────────────────────────────────────────────────────────
     private final List<TargetParticle> particles = new ArrayList<>();
 
+    // ─── Config cache ─────────────────────────────────────────────────────────
+    // Her tick'te AutoConfig.getConfigHolder çağırmak yerine cache'liyoruz.
+    private HitXConfig cachedConfig = null;
+
+    // ─── Night Vision refresh eşiği ───────────────────────────────────────────
+    // 400 tick = 20 saniye; 100 kala yenilemek daha temiz.
+    private static final int NV_REFRESH_THRESHOLD = 100;
+
+    // =========================================================================
+    //  INIT
+    // =========================================================================
     @Override
     public void onInitializeClient() {
         AutoConfig.register(HitXConfig.class, GsonConfigSerializer::new);
 
+        // ── Envanter & Sandık ekranlarına buton enjeksiyonu ───────────────────
         ScreenEvents.AFTER_INIT.register((client, screen, W, H) -> {
+
             if (screen instanceof GenericContainerScreen chest) {
-                int sx = W / 2 + 92, sy = H / 2 - 80, id = chest.getScreenHandler().syncId;
-                // Görselli, yuvarlak köşeli ve Flop animasyonlu butonlar
-                iconBtn(screen, new ItemStack(Items.HOPPER), "Herşeyi Al", sx, sy, 24, 20, b -> { int s = chest.getScreenHandler().getInventory().size(); for (int i = 0; i < s; i++) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player); });
-                iconBtn(screen, new ItemStack(Items.CHEST), "Herşeyi Koy", sx, sy + 24, 24, 20, b -> { int s = chest.getScreenHandler().getInventory().size(); for (int i = s; i < s + 36; i++) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player); });
-                iconBtn(screen, new ItemStack(Items.DROPPER), "Herşeyi At", sx, sy + 48, 24, 20, b -> { for (int i = 0; i < chest.getScreenHandler().slots.size(); i++) client.interactionManager.clickSlot(id, i, 1, SlotActionType.THROW, client.player); });
-                iconBtn(screen, new ItemStack(Items.LAVA_BUCKET), "Çöpleri At", sx, sy + 72, 24, 20, b -> { for (int i = 0; i < chest.getScreenHandler().slots.size(); i++) { ItemStack st = chest.getScreenHandler().getSlot(i).getStack(); if (isTrash(st)) client.interactionManager.clickSlot(id, i, 1, SlotActionType.THROW, client.player); } });
+                int sx = W / 2 + 92, sy = H / 2 - 80;
+                int id = chest.getScreenHandler().syncId;
+
+                iconBtn(screen, new ItemStack(Items.HOPPER),     "Herşeyi Al",  sx, sy,      24, 20,
+                    b -> { int s = chest.getScreenHandler().getInventory().size(); for (int i = 0; i < s; i++) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player); });
+
+                iconBtn(screen, new ItemStack(Items.CHEST),      "Herşeyi Koy", sx, sy + 24, 24, 20,
+                    b -> { int s = chest.getScreenHandler().getInventory().size(); for (int i = s; i < s + 36; i++) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player); });
+
+                iconBtn(screen, new ItemStack(Items.DROPPER),    "Herşeyi At",  sx, sy + 48, 24, 20,
+                    b -> { for (int i = 0; i < chest.getScreenHandler().slots.size(); i++) client.interactionManager.clickSlot(id, i, 1, SlotActionType.THROW, client.player); });
+
+                iconBtn(screen, new ItemStack(Items.LAVA_BUCKET),"Çöpleri At",  sx, sy + 72, 24, 20,
+                    b -> { for (int i = 0; i < chest.getScreenHandler().slots.size(); i++) { ItemStack st = chest.getScreenHandler().getSlot(i).getStack(); if (isTrash(st)) client.interactionManager.clickSlot(id, i, 1, SlotActionType.THROW, client.player); } });
+
+                // YENİ: Sadece araç almak için "Araçları Al" butonu
+                iconBtn(screen, new ItemStack(Items.IRON_PICKAXE),"Araçları Al", sx, sy + 96, 24, 20,
+                    b -> { for (int i = 0; i < chest.getScreenHandler().slots.size(); i++) { ItemStack st = chest.getScreenHandler().getSlot(i).getStack(); if (isTool(st)) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player); } });
             }
+
             if (screen instanceof InventoryScreen inv) {
-                int x = W / 2 - 25, y = H / 2 - 83, id = inv.getScreenHandler().syncId;
-                // Envanter ekranı için yan yana görselli butonlar
-                iconBtn(screen, new ItemStack(Items.DIAMOND_CHESTPLATE), "Zırhı Giy", x, y, 24, 20, b -> { for (int i = 9; i < 45; i++) { ItemStack st = inv.getScreenHandler().getSlot(i).getStack(); if (isArmor(st)) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player); } });
-                iconBtn(screen, new ItemStack(Items.SPONGE), "Temizle", x + 28, y, 24, 20, b -> { for (int i = 9; i < 45; i++) client.interactionManager.clickSlot(id, i, 1, SlotActionType.THROW, client.player); });
+                int x = W / 2 - 25, y = H / 2 - 83;
+                int id = inv.getScreenHandler().syncId;
+
+                iconBtn(screen, new ItemStack(Items.DIAMOND_CHESTPLATE), "Zırhı Giy", x,      y, 24, 20,
+                    b -> { for (int i = 9; i < 45; i++) { ItemStack st = inv.getScreenHandler().getSlot(i).getStack(); if (isArmor(st)) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player); } });
+
+                iconBtn(screen, new ItemStack(Items.SPONGE),             "Temizle",   x + 28, y, 24, 20,
+                    b -> { for (int i = 9; i < 45; i++) client.interactionManager.clickSlot(id, i, 1, SlotActionType.THROW, client.player); });
+
+                // YENİ: Yiyecekleri hotbar'a taşı
+                iconBtn(screen, new ItemStack(Items.COOKED_BEEF),        "Yiyecek →", x + 56, y, 24, 20,
+                    b -> { for (int i = 9; i < 45; i++) { ItemStack st = inv.getScreenHandler().getSlot(i).getStack(); if (isFood(st)) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player); } });
             }
         });
 
+        // ── Oyun ticki ────────────────────────────────────────────────────────
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.player == null || client.world == null) return;
-            HitXConfig config = AutoConfig.getConfigHolder(HitXConfig.class).getConfig();
 
-            boolean r = GLFW.glfwGetKey(client.getWindow().getHandle(), GLFW.GLFW_KEY_R) == GLFW.GLFW_PRESS;
-            if (r && !rLast) { hudOn = !hudOn; client.player.sendMessage(Text.literal(hudOn ? "§dHUD Açıldı" : "§fHUD Kapatıldı"), true); }
-            rLast = r;
-
-            boolean n = GLFW.glfwGetKey(client.getWindow().getHandle(), GLFW.GLFW_KEY_N) == GLFW.GLFW_PRESS;
-            if (n && !nLast) { tagOn = !tagOn; client.player.sendMessage(Text.literal(tagOn ? "§dBar Açıldı" : "§fBar Kapatıldı"), true); }
-            nLast = n;
-
-            boolean p = GLFW.glfwGetKey(client.getWindow().getHandle(), GLFW.GLFW_KEY_P) == GLFW.GLFW_PRESS;
-            if (p && !pLast) { config.particleOn = !config.particleOn; client.player.sendMessage(Text.literal(config.particleOn ? "§dPartiküller Açıldı" : "§fPartiküller Kapatıldı"), true); }
-            pLast = p;
-
-            if (client.options.forwardKey.isPressed() && !client.player.horizontalCollision && !client.player.isSneaking() && client.player.getHungerManager().getFoodLevel() > 6)
-                client.player.setSprinting(true);
-            if (!client.player.hasStatusEffect(StatusEffects.NIGHT_VISION))
-                client.player.addStatusEffect(new StatusEffectInstance(StatusEffects.NIGHT_VISION, 400, 0, false, false, false));
-
-            boolean show = false;
-            if (client.crosshairTarget instanceof EntityHitResult e && e.getEntity() instanceof PlayerEntity pl && pl.isAlive()) { target = pl; show = true; }
-            if (!show) {
-                Vec3d eye = client.player.getCameraPosVec(1f), look = client.player.getRotationVec(1f).normalize();
-                List<PlayerEntity> near = client.world.getEntitiesByClass(PlayerEntity.class, client.player.getBoundingBox().expand(RANGE), ent -> ent != client.player && ent.isAlive());
-                PlayerEntity best = null; double bd = DOT;
-                for (PlayerEntity c : near) { double d = look.dotProduct(c.getCameraPosVec(1f).subtract(eye).normalize()); if (d > bd) { bd = d; best = c; } }
-                if (best != null) { target = best; show = true; }
+            // Config cache — her tick yenilenmez, sadece değişince
+            if (cachedConfig == null) {
+                cachedConfig = AutoConfig.getConfigHolder(HitXConfig.class).getConfig();
             }
-            if (!show) target = null;
-            alpha = show && hudOn ? Math.min(1f, alpha + FADE) : Math.max(0f, alpha - FADE);
 
-            if (config.particleOn && hudOn && target != null && alpha > 0.1f) {
-                if (client.world.random.nextFloat() < 0.3f) {
-                    particles.add(new TargetParticle(client.world.random.nextFloat() * 155, client.world.random.nextFloat() * 46));
-                }
-            }
-            particles.removeIf(TargetParticle::update);
+            handleKeybinds(client);
+            handleAutoSprint(client);
+            handleNightVision(client);
+            handleTargetTracking(client);
+            handleParticles(client);
+            updateFpsHistory(client);
         });
 
+        // ── HUD render ────────────────────────────────────────────────────────
         HudRenderCallback.EVENT.register((ctx, tickCounter) -> {
             MinecraftClient mc = MinecraftClient.getInstance();
             if (mc.player == null || mc.options.hudHidden) return;
-            HitXConfig config = AutoConfig.getConfigHolder(HitXConfig.class).getConfig();
-            int sw = mc.getWindow().getScaledWidth(), sh = mc.getWindow().getScaledHeight();
+
+            int sw    = mc.getWindow().getScaledWidth();
+            int sh    = mc.getWindow().getScaledHeight();
             float delta = tickCounter.getTickDelta(true);
 
-            int flop = getPinkWhiteFlop(0, 1.0f);
-            ctx.drawText(mc.textRenderer, "FPS " + mc.getCurrentFps(), 5, 5, flop, true);
-            ctx.drawText(mc.textRenderer, "HUD [R] " + (hudOn ? "ON" : "OFF"), 5, 14, getPinkWhiteFlop(100, 1.0f), true);
-            ctx.drawText(mc.textRenderer, "PRT [P] " + (config.particleOn ? "ON" : "OFF"), 5, 23, getPinkWhiteFlop(200, 1.0f), true);
+            // Flop renkleri hesapla (sadece bir kez)
+            int flop0   = getPinkWhiteFlop(0,   1.0f);
+            int flop100 = getPinkWhiteFlop(100, 1.0f);
+            int flop200 = getPinkWhiteFlop(200, 1.0f);
 
-            renderPadejHotbar(ctx, mc, sw, sh, delta, flop);
-
-            if (tagOn && mc.world != null) {
-                for (PlayerEntity pl : mc.world.getPlayers()) {
-                    if (pl == mc.player || !pl.isAlive()) continue;
-                    double dist = mc.player.distanceTo(pl);
-                    if (dist > RANGE + 1) continue;
-                    double wx = lerp(pl.lastRenderX, pl.getX(), delta);
-                    double wy = lerp(pl.lastRenderY, pl.getY(), delta);
-                    double wz = lerp(pl.lastRenderZ, pl.getZ(), delta);
-                    double[] sc = proj(mc, new Vec3d(wx, wy + pl.getHeight() + 0.3, wz), sw, sh);
-                    if (sc != null) {
-                        int bx = (int) sc[0] - 20, py = (int) sc[1], bw = 40;
-                        float r = pl.getHealth() / pl.getMaxHealth();
-                        ctx.fill(bx - 1, py - 1, bx + bw + 1, py + 3, 0xAA000000);
-                        ctx.fill(bx, py, bx + (int)(r * bw), py + 2, getHealthColor(r, System.currentTimeMillis(), pl.getId()));
-                    }
-                }
-            }
-
-            if (alpha <= 0.01f || !hudOn) return;
-            int bW = 155, bH = 46, bX = (sw * config.hudX) / 100 - bW / 2, bY = (sh * config.hudY) / 100 - bH / 2;
-            int hpColor = getPinkWhiteFlop(0, alpha);
-
-            ctx.getMatrices().push();
-            ctx.getMatrices().translate(bX + bW/2f, bY + bH/2f, 0);
-            ctx.getMatrices().scale(config.hudScale/100f, config.hudScale/100f, 1);
-            ctx.getMatrices().translate(-bW/2f, -bH/2f, 0);
-
-            ctx.fill(0, 0, bW, bH, (int)(alpha * 180) << 24 | 0x050505);
-            ctx.fill(0, 0, bW, 1, hpColor);
-            
-            if (target != null) {
-                Identifier sk = mc.getSkinProvider().getSkinTextures(target.getGameProfile()).texture();
-                ctx.drawTexture(sk, 5, 5, 20, 20, 8, 8, 8, 8, 64, 64);
-                ctx.drawText(mc.textRenderer, target.getName().getString(), 32, 10, 0xFFFFFF, true);
-                float r = target.getHealth() / target.getMaxHealth();
-                ctx.fill(32, 25, 32 + 110, 30, 0xFF222222);
-                ctx.fill(32, 25, 32 + (int)(r * 110), 30, hpColor);
-                ctx.drawText(mc.textRenderer, (int)target.getHealth() + " دم", bW - 35, 32, hpColor, true);
-            }
-
-            if (config.particleOn) for (TargetParticle p : particles) p.render(ctx, hpColor);
-            ctx.getMatrices().pop();
+            renderInfoOverlay(ctx, mc, flop0, flop100, flop200);
+            if (kbOn) renderPadejHotbar(ctx, mc, sw, sh, delta, flop0);
+            if (tagOn && mc.world != null) renderHealthTags(ctx, mc, sw, sh, delta);
+            renderTargetHud(ctx, mc, sw, sh, flop0);
+            renderComboIndicator(ctx, mc, sw, sh, delta);
         });
     }
 
+    // =========================================================================
+    //  TICK HELPERS
+    // =========================================================================
+
+    private void handleKeybinds(MinecraftClient client) {
+        long win = client.getWindow().getHandle();
+
+        boolean r = GLFW.glfwGetKey(win, GLFW.GLFW_KEY_R) == GLFW.GLFW_PRESS;
+        if (r && !rLast) {
+            hudOn = !hudOn;
+            client.player.sendMessage(Text.literal(hudOn ? "§dHUD §fAçıldı" : "§7HUD §fKapatıldı"), true);
+        }
+        rLast = r;
+
+        boolean n = GLFW.glfwGetKey(win, GLFW.GLFW_KEY_N) == GLFW.GLFW_PRESS;
+        if (n && !nLast) {
+            tagOn = !tagOn;
+            client.player.sendMessage(Text.literal(tagOn ? "§dHP Bar §fAçıldı" : "§7HP Bar §fKapatıldı"), true);
+        }
+        nLast = n;
+
+        boolean p = GLFW.glfwGetKey(win, GLFW.GLFW_KEY_P) == GLFW.GLFW_PRESS;
+        if (p && !pLast) {
+            cachedConfig.particleOn = !cachedConfig.particleOn;
+            client.player.sendMessage(Text.literal(cachedConfig.particleOn ? "§dPartiküller §fAçıldı" : "§7Partiküller §fKapatıldı"), true);
+        }
+        pLast = p;
+
+        // YENİ: [H] tuşu ile hotbar aç/kapat
+        boolean h = GLFW.glfwGetKey(win, GLFW.GLFW_KEY_H) == GLFW.GLFW_PRESS;
+        if (h && !hLast) {
+            kbOn = !kbOn;
+            client.player.sendMessage(Text.literal(kbOn ? "§dHotbar §fAçıldı" : "§7Hotbar §fKapatıldı"), true);
+        }
+        hLast = h;
+    }
+
+    private void handleAutoSprint(MinecraftClient client) {
+        if (client.options.forwardKey.isPressed()
+                && !client.player.horizontalCollision
+                && !client.player.isSneaking()
+                && client.player.getHungerManager().getFoodLevel() > 6) {
+            client.player.setSprinting(true);
+        }
+    }
+
+    private void handleNightVision(MinecraftClient client) {
+        StatusEffectInstance nv = client.player.getStatusEffect(StatusEffects.NIGHT_VISION);
+        // Sadece süresi dolmak üzereyse yenile, yoksa ekle — gereksiz yenilemeyi engeller
+        if (nv == null || nv.getDuration() < NV_REFRESH_THRESHOLD) {
+            client.player.addStatusEffect(
+                new StatusEffectInstance(StatusEffects.NIGHT_VISION, 800, 0, false, false, false)
+            );
+        }
+    }
+
+    private void handleTargetTracking(MinecraftClient client) {
+        boolean show = false;
+        PlayerEntity found = null;
+
+        // Önce crosshair hedefi dene
+        if (client.crosshairTarget instanceof EntityHitResult e
+                && e.getEntity() instanceof PlayerEntity pl
+                && pl.isAlive()) {
+            found = pl;
+            show  = true;
+        }
+
+        // Yoksa dot-product ile en yakın oyuncuyu bul
+        if (!show) {
+            Vec3d eye  = client.player.getCameraPosVec(1f);
+            Vec3d look = client.player.getRotationVec(1f).normalize();
+            List<PlayerEntity> near = client.world.getEntitiesByClass(
+                PlayerEntity.class,
+                client.player.getBoundingBox().expand(RANGE),
+                ent -> ent != client.player && ent.isAlive()
+            );
+            double bestDot = DOT;
+            for (PlayerEntity c : near) {
+                double d = look.dotProduct(c.getCameraPosVec(1f).subtract(eye).normalize());
+                if (d > bestDot) { bestDot = d; found = c; }
+            }
+            if (found != null) show = true;
+        }
+
+        // Hedef değişince kombo arttır
+        if (show && found != target) {
+            comboCount++;
+            comboAlpha = 1.5f; // fade-in için
+        }
+        if (!show) {
+            // Hedef kaybolunca 3 saniye bekle, sonra sıfırla
+            if (target != null) lastTargetTime = System.currentTimeMillis();
+            if (System.currentTimeMillis() - lastTargetTime > 3000) comboCount = 0;
+        }
+
+        target = show ? found : null;
+        alpha  = show && hudOn
+            ? Math.min(1f, alpha + FADE)
+            : Math.max(0f, alpha - FADE);
+
+        // Lock-pulse animasyonu
+        if (show && alpha > 0.9f) {
+            lockPulse += lockPulseDir ? 0.05f : -0.05f;
+            if (lockPulse >= 1f) { lockPulse = 1f; lockPulseDir = false; }
+            if (lockPulse <= 0f) { lockPulse = 0f; lockPulseDir = true;  }
+        }
+    }
+
+    private void handleParticles(MinecraftClient client) {
+        if (cachedConfig.particleOn && hudOn && target != null && alpha > 0.1f) {
+            if (client.world.random.nextFloat() < 0.35f) {
+                // YENİ: partiküller HUD sınırları içinde başlasın (merkezden dışa fırlasın)
+                float px = 77.5f + (client.world.random.nextFloat() - 0.5f) * 130f;
+                float py = 23f   + (client.world.random.nextFloat() - 0.5f) * 40f;
+                particles.add(new TargetParticle(px, py));
+            }
+        }
+        // ConcurrentModificationException'dan kaçın: iterator ile sil
+        Iterator<TargetParticle> it = particles.iterator();
+        while (it.hasNext()) { if (it.next().update()) it.remove(); }
+    }
+
+    private void updateFpsHistory(MinecraftClient client) {
+        fpsHistory[fpsHistoryIdx % 60] = client.getCurrentFps();
+        fpsHistoryIdx++;
+    }
+
+    // =========================================================================
+    //  RENDER HELPERS
+    // =========================================================================
+
+    /** Sol üst bilgi katmanı: FPS, ortalama FPS, tuş durumları */
+    private void renderInfoOverlay(DrawContext ctx, MinecraftClient mc, int c0, int c1, int c2) {
+        int fps = mc.getCurrentFps();
+        int avgFps = 0;
+        for (int v : fpsHistory) avgFps += v;
+        avgFps /= 60;
+
+        // FPS rengi: yüksekse yeşilimsi, düşükse kırmızımsı flop
+        String fpsLabel = fps < 30 ? "§c" : fps < 60 ? "§e" : "§a";
+        ctx.drawText(mc.textRenderer, fpsLabel + "FPS " + fps + " §7(" + avgFps + " avg)", 5, 5,  0xFFFFFFFF, true);
+        ctx.drawText(mc.textRenderer, "§d[R] §fHUD " + (hudOn          ? "§aON" : "§7OFF"),  5, 14, 0xFFFFFFFF, true);
+        ctx.drawText(mc.textRenderer, "§d[P] §fPRT " + (cachedConfig != null && cachedConfig.particleOn ? "§aON" : "§7OFF"), 5, 23, 0xFFFFFFFF, true);
+        ctx.drawText(mc.textRenderer, "§d[H] §fKB  " + (kbOn           ? "§aON" : "§7OFF"),  5, 32, 0xFFFFFFFF, true);
+        ctx.drawText(mc.textRenderer, "§d[N] §fBAR " + (tagOn           ? "§aON" : "§7OFF"), 5, 41, 0xFFFFFFFF, true);
+
+        // YENİ: Sağ üstte koordinatlar
+        if (MinecraftClient.getInstance().player != null) {
+            var pos = MinecraftClient.getInstance().player.getBlockPos();
+            String coords = "§7XYZ §f" + pos.getX() + " §7/ §f" + pos.getY() + " §7/ §f" + pos.getZ();
+            int tw = MinecraftClient.getInstance().textRenderer.getWidth(coords);
+            ctx.drawText(mc.textRenderer, coords, MinecraftClient.getInstance().getWindow().getScaledWidth() - tw - 5, 5, 0xFFFFFFFF, true);
+        }
+    }
+
+    /** Özel pembe-beyaz animasyonlu hotbar */
     private void renderPadejHotbar(DrawContext ctx, MinecraftClient mc, int sw, int sh, float delta, int flop) {
         PlayerInventory inv = mc.player.getInventory();
-        int w = 182, h = 22, x = (sw - w) / 2, y = sh - 25;
-        selectItemX = lerp(selectItemX, inv.selectedSlot * 20f, delta * 0.25f);
-        
-        ctx.fill(x - 2, y - 2, x + w + 2, y + h + 2, 0x88000000);
-        int sx = (int)(x + selectItemX);
-        ctx.fill(sx, y, sx + 22, y + 22, applyAlpha(flop, 120));
-        ctx.fill(sx, y, sx + 22, y + 1, flop);
-        ctx.fill(sx, y + 21, sx + 22, y + 22, flop);
+        int w = 182, h = 22;
+        int x = (sw - w) / 2;
+        int y = sh - 25;
 
+        // Lerp hızını delta'ya bağlı yap — frame rate bağımsız
+        float lerpSpeed = 1f - (float) Math.pow(0.1, delta);
+        selectItemX = lerp(selectItemX, inv.selectedSlot * 20f, lerpSpeed);
+
+        // Dış çerçeve (hafif şeffaf)
+        ctx.fill(x - 2, y - 2, x + w + 2, y + h + 2, 0x88000000);
+
+        // İç dolgu
+        ctx.fill(x, y, x + w, y + h, 0x55111111);
+
+        // Seçili slot highlight
+        int sx = (int)(x + selectItemX);
+        ctx.fill(sx, y, sx + 22, y + 22, applyAlpha(flop, 80));  // dolgu
+        ctx.fill(sx,      y,      sx + 22, y + 1,      flop);     // üst kenar
+        ctx.fill(sx,      y + 21, sx + 22, y + 22,     flop);     // alt kenar
+        ctx.fill(sx,      y,      sx + 1,  y + 22,     flop);     // sol kenar
+        ctx.fill(sx + 21, y,      sx + 22, y + 22,     flop);     // sağ kenar
+
+        // YENİ: Tüm slotlar için hafif bölücü çizgiler
+        for (int i = 1; i < 9; i++) {
+            int lx = x + i * 20;
+            ctx.fill(lx, y + 2, lx + 1, y + h - 2, 0x22FFFFFF);
+        }
+
+        // Eşyaları çiz
         for (int i = 0; i < 9; i++) {
             ItemStack s = inv.main.get(i);
-            int ix = x + i * 20 + 3, iy = y + 3;
+            int ix = x + i * 20 + 3;
+            int iy = y + 3;
             ctx.drawItem(s, ix, iy);
             ctx.drawItemInSlot(mc.textRenderer, s, ix, iy);
         }
-    }
 
-    // --- ÖZEL İKON BUTONU SINIFI (Görseldeki tasarımı uygular) ---
-    private static class FlopIconButton extends ButtonWidget {
-        private final ItemStack icon;
-
-        public FlopIconButton(int x, int y, int width, int height, ItemStack icon, String tooltipStr, PressAction onPress) {
-            super(x, y, width, height, Text.literal(tooltipStr), onPress, DEFAULT_NARRATION_SUPPLIER);
-            this.icon = icon;
-            this.setTooltip(Tooltip.of(Text.literal(tooltipStr)));
-        }
-
-        @Override
-        public void renderWidget(DrawContext ctx, int mouseX, int mouseY, float delta) {
-            // Animasyonlu Flop rengini al, fare üzerine gelince biraz daha parlak yap
-            int flopColor = getPinkWhiteFlop(this.isHovered() ? 0 : 300, 1.0f);
-            
-            int x = this.getX();
-            int y = this.getY();
-            int w = this.getWidth();
-            int h = this.getHeight();
-
-            // Gönderdiğin görseldeki gibi koyu, mat arka plan
-            int bg = 0xFF222222; 
-            ctx.fill(x + 2, y, x + w - 2, y + h, bg);
-            ctx.fill(x, y + 2, x + w, y + h - 2, bg);
-            ctx.fill(x + 1, y + 1, x + w - 1, y + h - 1, bg);
-
-            // Pembe-Beyaz Flop Animasyonlu Kenarlık (Dış Yapı - Köşeleri Yuvarlatılmış)
-            ctx.fill(x + 2, y, x + w - 2, y + 1, flopColor); // Üst Çizgi
-            ctx.fill(x + 2, y + h - 1, x + w - 2, y + h, flopColor); // Alt Çizgi
-            ctx.fill(x, y + 2, x + 1, y + h - 2, flopColor); // Sol Çizgi
-            ctx.fill(x + w - 1, y + 2, x + w, y + h - 2, flopColor); // Sağ Çizgi
-            
-            // Kenar Yumuşatma Noktaları (Oval Hap görünümü için)
-            ctx.fill(x + 1, y + 1, x + 2, y + 2, flopColor);
-            ctx.fill(x + w - 2, y + 1, x + w - 1, y + 2, flopColor);
-            ctx.fill(x + 1, y + h - 2, x + 2, y + h - 1, flopColor);
-            ctx.fill(x + w - 2, y + h - 2, x + w - 1, y + h - 1, flopColor);
-
-            // İkonu tam merkeze oturtarak çiz
-            ctx.drawItem(this.icon, x + (w - 16) / 2, y + (h - 16) / 2);
+        // YENİ: Mevcut eşya adını hotbar'ın üstünde göster
+        ItemStack held = inv.main.get(inv.selectedSlot);
+        if (!held.isEmpty()) {
+            String name = held.getName().getString();
+            int nameW = mc.textRenderer.getWidth(name);
+            int nameX = (sw - nameW) / 2;
+            // Soluk beyaz arka plan gölgesi
+            ctx.fill(nameX - 2, y - 14, nameX + nameW + 2, y - 3, 0x55000000);
+            ctx.drawText(mc.textRenderer, name, nameX, y - 12, flop, true);
         }
     }
 
-    public static class TargetParticle {
-        float x, y, mx, my, age, maxAge;
-        public TargetParticle(float x, float y) { 
-            this.x = x; this.y = y; 
-            this.mx = (float)(Math.random() - 0.5) * 2f; 
-            this.my = (float)(Math.random() - 0.5) * 2f; 
-            this.age = 20; this.maxAge = 20; 
+    /** Oyunculara oyun dünyasında HP barı yansıt */
+    private void renderHealthTags(DrawContext ctx, MinecraftClient mc, int sw, int sh, float delta) {
+        for (PlayerEntity pl : mc.world.getPlayers()) {
+            if (pl == mc.player || !pl.isAlive()) continue;
+            double dist = mc.player.distanceTo(pl);
+            if (dist > RANGE + 1) continue;
+
+            double wx = lerp(pl.lastRenderX, pl.getX(), delta);
+            double wy = lerp(pl.lastRenderY, pl.getY(), delta);
+            double wz = lerp(pl.lastRenderZ, pl.getZ(), delta);
+            double[] sc = proj(mc, new Vec3d(wx, wy + pl.getHeight() + 0.3, wz), sw, sh);
+            if (sc == null) continue;
+
+            int bx = (int) sc[0] - 20;
+            int py = (int) sc[1];
+            int bw = 40;
+            float r = pl.getHealth() / pl.getMaxHealth();
+            long now = System.currentTimeMillis();
+
+            // HP bar arka planı + dolgu
+            ctx.fill(bx - 1, py - 1, bx + bw + 1, py + 4, 0xAA000000);
+            ctx.fill(bx, py, bx + (int)(r * bw), py + 3, getHealthColor(r, now, pl.getId()));
+
+            // YENİ: Oyuncu adı ve mesafe
+            String label = pl.getName().getString() + " §7" + (int) dist + "m";
+            int lw = mc.textRenderer.getWidth(label);
+            ctx.drawText(mc.textRenderer, label, (int) sc[0] - lw / 2, py - 10, 0xFFFFFFFF, true);
         }
-        public boolean update() { x += mx; y += my; mx *= 0.95f; my *= 0.95f; age--; return age < 0; }
-        public void render(DrawContext ctx, int color) {
-            int a = (int)((age / maxAge) * 255);
-            ctx.fill((int)x, (int)y, (int)x + 2, (int)y + 2, (a << 24) | (color & 0xFFFFFF));
-        }
     }
 
-    private float lerp(float a, float b, float t) { return a + (b - a) * t; }
-    private double lerp(double a, double b, float t) { return a + (b - a) * t; }
+    /** Ana hedef HUD paneli */
+    private void renderTargetHud(DrawContext ctx, MinecraftClient mc, int sw, int sh, int flop) {
+        if (alpha <= 0.01f || !hudOn) return;
 
-    private int getHealthColor(float r, long n, int s) {
-        if (r > 0.6f) return 0xFF000000 | ((int)(255 * (1f - (r - 0.6f) / 0.4f)) << 16) | (0xCC << 8) | 0x44;
-        return 0xFF000000 | (0xFF << 16) | ((int)(100 + 100 * (r / 0.6f)) << 8) | 0x22;
-    }
+        int bW = 160, bH = 52;
+        int bX = (sw * cachedConfig.hudX) / 100 - bW / 2;
+        int bY = (sh * cachedConfig.hudY) / 100 - bH / 2;
+        int hpColor = getPinkWhiteFlop(0, alpha);
+        float scale = cachedConfig.hudScale / 100f;
 
-    // Metodu static yaptık ki buton sınıfından ulaşılabilsin
-    public static int getPinkWhiteFlop(int o, float a) {
-        double w = (Math.sin((System.currentTimeMillis() + o) / 300.0) + 1.0) / 2.0;
-        return ((int)(255 * a) << 24) | (0xFF << 16) | ((int)(130 + 125 * w) << 8) | (int)(200 + 55 * w);
-    }
+        ctx.getMatrices().push();
+        ctx.getMatrices().translate(bX + bW / 2f, bY + bH / 2f, 0);
+        ctx.getMatrices().scale(scale, scale, 1);
+        ctx.getMatrices().translate(-bW / 2f, -bH / 2f, 0);
 
-    private static int applyAlpha(int c, int a) { return (Math.min(a, 255) << 24) | (c & 0x00FFFFFF); }
+        // Arka plan
+        int bgAlpha = (int)(alpha * 190);
+        ctx.fill(0, 0, bW, bH, (bgAlpha << 24) | 0x050505);
 
-    private double[] proj(MinecraftClient mc, Vec3d w, int sw, int sh) {
-        try {
-            var cam = mc.gameRenderer.getCamera(); Vec3d rel = w.subtract(cam.getPos());
-            if (mc.player.getRotationVec(1f).dotProduct(rel.normalize()) < 0) return null;
-            double yr = Math.toRadians(cam.getYaw()), pr = Math.toRadians(cam.getPitch());
-            double rx = rel.x * Math.cos(yr) - rel.z * Math.sin(yr), ry = rel.y, rz = rel.x * Math.sin(yr) + rel.z * Math.cos(yr);
-            double ry2 = ry * Math.cos(pr) - rz * Math.sin(pr), rz2 = ry * Math.sin(pr) + rz * Math.cos(pr);
-            if (rz2 <= 0.1) return null;
-            double p = sw / (2.0 * Math.tan(Math.toRadians(mc.options.getFov().getValue()) / 2.0));
-            return new double[]{ sw / 2.0 + (rx / rz2) * p, sh / 2.0 - (ry2 / rz2) * p };
-        } catch (Exception e) { return null; }
-    }
-
-    // Yeni buton ekleme metodumuz
-    private void iconBtn(Screen s, ItemStack icon, String t, int x, int y, int w, int h, ButtonWidget.PressAction a) {
-        Screens.getButtons(s).add(new FlopIconButton(x, y, w, h, icon, t, a));
-    }
-    
-    private boolean isTrash(ItemStack s) { return s.isOf(Items.ROTTEN_FLESH) || s.isOf(Items.DIRT) || s.isOf(Items.COBBLESTONE); }
-    private boolean isArmor(ItemStack s) { String n = s.getItem().toString().toLowerCase(); return n.contains("helmet") || n.contains("chestplate") || n.contains("leggings") || n.contains("boots"); }
-                    }
-                                                                                    
+        // Üst kenarlık
+        ctx.fill(0, 0, bW, 1, hpColor);
+        // Alt kenarlık (daha soluk)
+        ctx.fill(0, bH - 1, bW, bH, applyAlpha(hpColor, (int)(alpha * 80)));
+        // Sol k
