@@ -25,7 +25,7 @@ public class HitXConfig implements ConfigData {
 
     public static class Visuals {
         @ConfigEntry.ColorPicker
-        public int barColor = 0xFF00FF; // Pembe varsayılan
+        public int barColor = 0xFF00FF;
         public boolean sabitBar = false;
     }
 }
