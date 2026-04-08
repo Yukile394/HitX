@@ -16,13 +16,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class HitX implements ClientModInitializer {
-    // Ayarlar - Settings ekranından erişilmesi için public static
     public static boolean hudOn = true;
     public static boolean hitBoxActive = true;
     public static float xzExpand = 0.3f;
-    public static float yExpand = 0.1f;
-
-    private boolean kLast = false, rLast = false;
+    
+    private boolean kLast = false;
     private PlayerEntity target = null;
     private float alpha = 0f;
     private final List<TargetParticle> particles = new ArrayList<>();
@@ -33,28 +31,17 @@ public class HitX implements ClientModInitializer {
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.player == null) return;
+            HitXConfig config = AutoConfig.getConfigHolder(HitXConfig.class).getConfig();
 
-            // K Tuşu Menü / R Tuşu HUD
-            long h = client.getWindow().getHandle();
-            boolean kPressed = GLFW.glfwGetKey(h, GLFW.GLFW_KEY_K) == GLFW.GLFW_PRESS;
-            boolean rPressed = GLFW.glfwGetKey(h, GLFW.GLFW_KEY_R) == GLFW.GLFW_PRESS;
-
+            boolean kPressed = GLFW.glfwGetKey(client.getWindow().getHandle(), GLFW.GLFW_KEY_K) == GLFW.GLFW_PRESS;
             if (kPressed && !kLast) client.setScreen(new HitXSettingsScreen());
-            if (rPressed && !rLast) hudOn = !hudOn;
-            
             kLast = kPressed;
-            rLast = rPressed;
 
-            // Target Bulucu
-            if (client.crosshairTarget instanceof EntityHitResult e && e.getEntity() instanceof PlayerEntity pl) {
-                target = pl;
-            } else {
-                target = null;
-            }
+            if (client.crosshairTarget instanceof EntityHitResult e && e.getEntity() instanceof PlayerEntity pl) target = pl;
+            else target = null;
 
-            // Animasyon ve Partiküller
             alpha = (target != null && hudOn) ? Math.min(1f, alpha + 0.1f) : Math.max(0f, alpha - 0.1f);
-            if (alpha > 0.5f && client.world.random.nextFloat() < 0.3f) {
+            if (config.particleOn && alpha > 0.5f && client.world.random.nextFloat() < 0.3f) {
                 particles.add(new TargetParticle(client.world.random.nextFloat() * 160, client.world.random.nextFloat() * 50));
             }
             particles.removeIf(TargetParticle::update);
@@ -62,29 +49,32 @@ public class HitX implements ClientModInitializer {
 
         HudRenderCallback.EVENT.register((ctx, tick) -> {
             if (!hudOn || alpha <= 0.01f) return;
-            renderHUD(ctx, MinecraftClient.getInstance());
+            renderEverything(ctx, MinecraftClient.getInstance());
         });
     }
 
-    private void renderHUD(DrawContext ctx, MinecraftClient mc) {
-        int color = getPinkWhiteFlop(0, alpha);
+    private void renderEverything(DrawContext ctx, MinecraftClient mc) {
+        HitXConfig config = AutoConfig.getConfigHolder(HitXConfig.class).getConfig();
         int sw = mc.getWindow().getScaledWidth(), sh = mc.getWindow().getScaledHeight();
         
+        int x = (sw * config.hudX) / 100 - 80;
+        int y = (sh * config.hudY) / 100 - 25;
+        float scale = config.hudScale / 100f;
+        int color = config.visuals.sabitBar ? config.visuals.barColor : getPinkWhiteFlop(0, alpha);
+
         ctx.getMatrices().push();
-        ctx.getMatrices().translate(sw / 2 - 80, sh / 2 + 80, 0);
-        
+        ctx.getMatrices().translate(x, y, 0);
+        ctx.getMatrices().scale(scale, scale, 1);
         ctx.fill(-1, -1, 161, 51, (int)(alpha * 255) << 24 | (color & 0xFFFFFF));
-        ctx.fill(0, 0, 160, 50, 0xAA050505);
+        ctx.fill(0, 0, 160, 50, 0xCC050505);
         
         if (target != null) {
             Identifier skin = mc.getSkinProvider().getSkinTextures(target.getGameProfile()).texture();
             ctx.drawTexture(skin, 5, 5, 30, 30, 8, 8, 8, 8, 64, 64);
             ctx.drawText(mc.textRenderer, target.getName().getString(), 40, 10, -1, true);
             float hp = target.getHealth() / target.getMaxHealth();
-            ctx.fill(40, 25, 150, 32, 0x44FFFFFF);
             ctx.fill(40, 25, 40 + (int)(hp * 110), 32, color);
         }
-        
         for (TargetParticle p : particles) p.render(ctx, color, alpha);
         ctx.getMatrices().pop();
     }
