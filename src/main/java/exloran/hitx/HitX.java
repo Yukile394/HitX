@@ -1,3 +1,4 @@
+
 package exloran.hitx;
 
 import me.shedaniel.autoconfig.AutoConfig;
@@ -27,20 +28,34 @@ public class HitX implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
+        // Çökmeyi önlemek için kaydı en başta yapıyoruz
         AutoConfig.register(HitXConfig.class, GsonConfigSerializer::new);
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.player == null) return;
-            HitXConfig config = AutoConfig.getConfigHolder(HitXConfig.class).getConfig();
 
+            // Config'i güvenli çek
+            HitXConfig config;
+            try {
+                config = AutoConfig.getConfigHolder(HitXConfig.class).getConfig();
+            } catch (Exception e) {
+                return;
+            }
+
+            // K Tuşu Menü
             boolean kPressed = GLFW.glfwGetKey(client.getWindow().getHandle(), GLFW.GLFW_KEY_K) == GLFW.GLFW_PRESS;
-            if (kPressed && !kLast) client.setScreen(new HitXSettingsScreen());
+            if (kPressed && !kLast) {
+                client.execute(() -> client.setScreen(new HitXSettingsScreen()));
+            }
             kLast = kPressed;
 
+            // Target Bulma
             if (client.crosshairTarget instanceof EntityHitResult e && e.getEntity() instanceof PlayerEntity pl) target = pl;
             else target = null;
 
+            // Animasyon
             alpha = (target != null && hudOn) ? Math.min(1f, alpha + 0.1f) : Math.max(0f, alpha - 0.1f);
+            
             if (config.particleOn && alpha > 0.5f && client.world.random.nextFloat() < 0.3f) {
                 particles.add(new TargetParticle(client.world.random.nextFloat() * 160, client.world.random.nextFloat() * 50));
             }
@@ -65,6 +80,7 @@ public class HitX implements ClientModInitializer {
         ctx.getMatrices().push();
         ctx.getMatrices().translate(x, y, 0);
         ctx.getMatrices().scale(scale, scale, 1);
+        
         ctx.fill(-1, -1, 161, 51, (int)(alpha * 255) << 24 | (color & 0xFFFFFF));
         ctx.fill(0, 0, 160, 50, 0xCC050505);
         
