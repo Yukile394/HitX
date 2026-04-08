@@ -1,4 +1,4 @@
-package com.exloran.hitx;
+package exloran.hitx;
 
 import com.terraformersmc.modmenu.api.ConfigScreenFactory;
 import com.terraformersmc.modmenu.api.ModMenuApi;
