@@ -3,9 +3,15 @@
   "id": "hitx",
   "version": "${version}",
   "name": "HitX",
-  "description": "Advanced PvP Hit Marker Mod",
-  "authors": ["Yukile"],
+  "description": "Advanced PvP Hit Marker & HUD Mod",
+  "authors": [
+    "Yukile"
+  ],
+  "contact": {
+    "repo": "https://github.com/Yukile394/HitX"
+  },
   "license": "MIT",
+  "icon": "assets/hitx/icon.png",
   "environment": "client",
 
   "entrypoints": {
@@ -17,11 +23,16 @@
     ]
   },
 
+  "mixins": [
+    "hitx.mixins.json"
+  ],
+
   "depends": {
     "fabricloader": ">=0.15.0",
-    "minecraft": "1.21.x",
+    "minecraft": "~1.21",
     "fabric-api": "*",
     "java": ">=21",
-    "cloth-config2": "*"
+    "cloth-config2": ">=15.0.0",
+    "modmenu": "*"
   }
 }
