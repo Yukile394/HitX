@@ -6,26 +6,16 @@ import me.shedaniel.autoconfig.annotation.ConfigEntry;
 
 @Config(name = "hitx")
 public class HitXConfig implements ConfigData {
-
-    @ConfigEntry.Category("hud")
-    public int hudX = 78;
-
-    @ConfigEntry.Category("hud")
-    public int hudY = 40;
-
-    @ConfigEntry.Category("hud")
-    @ConfigEntry.BoundedDiscrete(min = 50, max = 200)
-    public int hudScale = 100;
-
-    @ConfigEntry.Category("hud")
     public boolean particleOn = true;
+    public int hudX = 50;
+    public int hudY = 50;
+    public int hudScale = 100;
 
     @ConfigEntry.Gui.CollapsibleObject
     public Visuals visuals = new Visuals();
 
     public static class Visuals {
-        @ConfigEntry.ColorPicker
-        public int barColor = 0xFF00FF;
         public boolean sabitBar = false;
+        public int barColor = 0xFFFFFFFF;
     }
 }
