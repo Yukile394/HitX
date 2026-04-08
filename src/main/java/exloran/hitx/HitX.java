@@ -32,10 +32,14 @@ import java.util.List;
 
 public class HitX implements ClientModInitializer {
 
-    public static boolean hudOn = true, tagOn = true;
+    // AYARLAR EKRANININ ARADIĞI DEĞİŞKENLER BURADA:
+    public static boolean hudOn = true;
+    public static boolean hitBoxActive = false;
+    public static float xzExpand = 0.1f;
+    
     private PlayerEntity target = null;
     private float alpha = 0f;
-    private boolean rLast = false, nLast = false, pLast = false;
+    private boolean rLast = false;
     private static final double RANGE = 6.5, DOT = 0.97;
     private static final float FADE = 0.12f;
 
@@ -47,24 +51,19 @@ public class HitX implements ClientModInitializer {
         AutoConfig.register(HitXConfig.class, GsonConfigSerializer::new);
 
         ScreenEvents.AFTER_INIT.register((client, screen, W, H) -> {
-            int id = -1;
             if (screen instanceof GenericContainerScreen chest) {
-                id = chest.getScreenHandler().syncId;
-                int sx = W / 2 + 92, sy = H / 2 - 80;
-                final int finalId = id;
-                iconBtn(screen, new ItemStack(Items.HOPPER), "Hepsini Al", sx, sy, 24, 20, b -> {
+                int id = chest.getScreenHandler().syncId;
+                iconBtn(screen, new ItemStack(Items.HOPPER), "Hepsini Al", W / 2 + 92, H / 2 - 80, 24, 20, b -> {
                     for (int i = 0; i < chest.getScreenHandler().getInventory().size(); i++) 
-                        client.interactionManager.clickSlot(finalId, i, 0, SlotActionType.QUICK_MOVE, client.player);
+                        client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player);
                 });
             }
             if (screen instanceof InventoryScreen inv) {
-                id = inv.getScreenHandler().syncId;
-                int x = W / 2 - 25, y = H / 2 - 83;
-                final int finalId = id;
-                iconBtn(screen, new ItemStack(Items.DIAMOND_CHESTPLATE), "Zırh Giy", x, y, 24, 20, b -> {
+                int id = inv.getScreenHandler().syncId;
+                iconBtn(screen, new ItemStack(Items.DIAMOND_CHESTPLATE), "Zırh Giy", W / 2 - 25, H / 2 - 83, 24, 20, b -> {
                     for (int i = 9; i < 45; i++) {
                         if (isArmor(inv.getScreenHandler().getSlot(i).getStack()))
-                            client.interactionManager.clickSlot(finalId, i, 0, SlotActionType.QUICK_MOVE, client.player);
+                            client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player);
                     }
                 });
             }
@@ -103,7 +102,6 @@ public class HitX implements ClientModInitializer {
             int flop = getPinkWhiteFlop(0, 1.0f);
 
             renderPadejHotbar(ctx, mc, sw, sh, delta, flop);
-
             if (alpha > 0.01f && hudOn) renderTargetHUD(ctx, mc, config, sw, sh, flop);
         });
     }
@@ -114,10 +112,8 @@ public class HitX implements ClientModInitializer {
         ctx.getMatrices().translate(bX + bW/2f, bY + bH/2f, 0);
         ctx.getMatrices().scale(config.hudScale/100f, config.hudScale/100f, 1);
         ctx.getMatrices().translate(-bW/2f, -bH/2f, 0);
-
         ctx.fill(0, 0, bW, bH, (int)(alpha * 180) << 24 | 0x050505);
         ctx.fill(0, 0, bW, 1, (hpColor & 0xFFFFFF) | ((int)(alpha * 255) << 24));
-        
         if (target != null) {
             Identifier sk = mc.getSkinProvider().getSkinTextures(target.getGameProfile()).texture();
             ctx.drawTexture(sk, 5, 5, 20, 20, 8, 8, 8, 8, 64, 64);
@@ -148,7 +144,6 @@ public class HitX implements ClientModInitializer {
         }
         @Override
         public void renderWidget(DrawContext ctx, int mouseX, int mouseY, float delta) {
-            int flop = getPinkWhiteFlop(0, 1.0f);
             ctx.fill(getX(), getY(), getX() + getWidth(), getY() + getHeight(), 0xFF222222);
             ctx.drawItem(this.icon, getX() + (getWidth() - 16) / 2, getY() + (getHeight() - 16) / 2);
         }
@@ -168,4 +163,4 @@ public class HitX implements ClientModInitializer {
 
     private boolean isArmor(ItemStack s) { String n = s.getItem().toString(); return n.contains("helmet") || n.contains("chestplate") || n.contains("leggings") || n.contains("boots"); }
     private void iconBtn(Screen s, ItemStack i, String t, int x, int y, int w, int h, ButtonWidget.PressAction a) { Screens.getButtons(s).add(new FlopIconButton(x, y, w, h, i, t, a)); }
-                              }
+        }
