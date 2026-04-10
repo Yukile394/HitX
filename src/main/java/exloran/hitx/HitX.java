@@ -1,4 +1,4 @@
-package com.exloran.hitx;
+package exloran.hitx;
 
 import me.shedaniel.autoconfig.AutoConfig;
 import me.shedaniel.autoconfig.serializer.GsonConfigSerializer;
@@ -24,6 +24,7 @@ import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.hit.EntityHitResult;
+import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import org.lwjgl.glfw.GLFW;
 
@@ -32,6 +33,7 @@ import java.util.List;
 
 public class HitX implements ClientModInitializer {
 
+    // Mevcut Değişkenler
     private boolean hudOn = true, tagOn = true;
     private PlayerEntity target = null;
     private float alpha = 0f;
@@ -42,6 +44,14 @@ public class HitX implements ClientModInitializer {
     private float selectItemX = 0f;
     private final List<TargetParticle> particles = new ArrayList<>();
 
+    // --- YENİ: HITBOX DEĞİŞKENLERİ ---
+    public static boolean hitBoxActive = false;
+    public static boolean invisibleHb = true; // Görünmez oyunculara Hitbox uygular
+    private boolean hLast = false;
+    // Yüzdelik Oranlar: %204.02 = 2.0402 | %113.05 = 1.1305
+    public static float hbWidthPercent = 2.0402f;
+    public static float hbHeightPercent = 1.1305f;
+
     @Override
     public void onInitializeClient() {
         AutoConfig.register(HitXConfig.class, GsonConfigSerializer::new);
@@ -49,7 +59,6 @@ public class HitX implements ClientModInitializer {
         ScreenEvents.AFTER_INIT.register((client, screen, W, H) -> {
             if (screen instanceof GenericContainerScreen chest) {
                 int sx = W / 2 + 92, sy = H / 2 - 80, id = chest.getScreenHandler().syncId;
-                // Görselli, yuvarlak köşeli ve Flop animasyonlu butonlar
                 iconBtn(screen, new ItemStack(Items.HOPPER), "Herşeyi Al", sx, sy, 24, 20, b -> { int s = chest.getScreenHandler().getInventory().size(); for (int i = 0; i < s; i++) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player); });
                 iconBtn(screen, new ItemStack(Items.CHEST), "Herşeyi Koy", sx, sy + 24, 24, 20, b -> { int s = chest.getScreenHandler().getInventory().size(); for (int i = s; i < s + 36; i++) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player); });
                 iconBtn(screen, new ItemStack(Items.DROPPER), "Herşeyi At", sx, sy + 48, 24, 20, b -> { for (int i = 0; i < chest.getScreenHandler().slots.size(); i++) client.interactionManager.clickSlot(id, i, 1, SlotActionType.THROW, client.player); });
@@ -57,7 +66,6 @@ public class HitX implements ClientModInitializer {
             }
             if (screen instanceof InventoryScreen inv) {
                 int x = W / 2 - 25, y = H / 2 - 83, id = inv.getScreenHandler().syncId;
-                // Envanter ekranı için yan yana görselli butonlar
                 iconBtn(screen, new ItemStack(Items.DIAMOND_CHESTPLATE), "Zırhı Giy", x, y, 24, 20, b -> { for (int i = 9; i < 45; i++) { ItemStack st = inv.getScreenHandler().getSlot(i).getStack(); if (isArmor(st)) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player); } });
                 iconBtn(screen, new ItemStack(Items.SPONGE), "Temizle", x + 28, y, 24, 20, b -> { for (int i = 9; i < 45; i++) client.interactionManager.clickSlot(id, i, 1, SlotActionType.THROW, client.player); });
             }
@@ -79,10 +87,36 @@ public class HitX implements ClientModInitializer {
             if (p && !pLast) { config.particleOn = !config.particleOn; client.player.sendMessage(Text.literal(config.particleOn ? "§dPartiküller Açıldı" : "§fPartiküller Kapatıldı"), true); }
             pLast = p;
 
+            // --- YENİ: HITBOX AÇ/KAPAT (H TUŞU) ---
+            boolean h = GLFW.glfwGetKey(client.getWindow().getHandle(), GLFW.GLFW_KEY_H) == GLFW.GLFW_PRESS;
+            if (h && !hLast) {
+                hitBoxActive = !hitBoxActive;
+                client.player.sendMessage(Text.literal(hitBoxActive ? "§aHitBox Açıldı §7(G: %204, Y: %113)" : "§cHitBox Kapatıldı"), true);
+            }
+            hLast = h;
+
             if (client.options.forwardKey.isPressed() && !client.player.horizontalCollision && !client.player.isSneaking() && client.player.getHungerManager().getFoodLevel() > 6)
                 client.player.setSprinting(true);
             if (!client.player.hasStatusEffect(StatusEffects.NIGHT_VISION))
                 client.player.addStatusEffect(new StatusEffectInstance(StatusEffects.NIGHT_VISION, 400, 0, false, false, false));
+
+            // --- YENİ: HITBOX UYGULAMA MEKANİĞİ ---
+            if (hitBoxActive) {
+                for (PlayerEntity pl : client.world.getPlayers()) {
+                    if (pl == client.player || !pl.isAlive()) continue;
+                    if (pl.isInvisible() && !invisibleHb) continue; // Invisible HB Kontrolü
+
+                    // Minecraft'ın standart oyuncu genişliği: 0.6, yüksekliği: 1.8
+                    float w = 0.6f * hbWidthPercent;
+                    float hght = 1.8f * hbHeightPercent;
+
+                    // Hitbox Kutusunu Matematiksel Olarak Genişlet (ThunderHack stili)
+                    pl.setBoundingBox(new Box(
+                            pl.getX() - w / 2.0, pl.getY(), pl.getZ() - w / 2.0,
+                            pl.getX() + w / 2.0, pl.getY() + hght, pl.getZ() + w / 2.0
+                    ));
+                }
+            }
 
             boolean show = false;
             if (client.crosshairTarget instanceof EntityHitResult e && e.getEntity() instanceof PlayerEntity pl && pl.isAlive()) { target = pl; show = true; }
@@ -115,6 +149,8 @@ public class HitX implements ClientModInitializer {
             ctx.drawText(mc.textRenderer, "FPS " + mc.getCurrentFps(), 5, 5, flop, true);
             ctx.drawText(mc.textRenderer, "HUD [R] " + (hudOn ? "ON" : "OFF"), 5, 14, getPinkWhiteFlop(100, 1.0f), true);
             ctx.drawText(mc.textRenderer, "PRT [P] " + (config.particleOn ? "ON" : "OFF"), 5, 23, getPinkWhiteFlop(200, 1.0f), true);
+            // Hitbox Durumunu Sol Üstte Göster
+            ctx.drawText(mc.textRenderer, "HB  [H] " + (hitBoxActive ? "ON" : "OFF"), 5, 32, getPinkWhiteFlop(300, 1.0f), true);
 
             renderPadejHotbar(ctx, mc, sw, sh, delta, flop);
 
@@ -182,7 +218,6 @@ public class HitX implements ClientModInitializer {
         }
     }
 
-    // --- ÖZEL İKON BUTONU SINIFI (Görseldeki tasarımı uygular) ---
     private static class FlopIconButton extends ButtonWidget {
         private final ItemStack icon;
 
@@ -194,33 +229,20 @@ public class HitX implements ClientModInitializer {
 
         @Override
         public void renderWidget(DrawContext ctx, int mouseX, int mouseY, float delta) {
-            // Animasyonlu Flop rengini al, fare üzerine gelince biraz daha parlak yap
             int flopColor = getPinkWhiteFlop(this.isHovered() ? 0 : 300, 1.0f);
-            
-            int x = this.getX();
-            int y = this.getY();
-            int w = this.getWidth();
-            int h = this.getHeight();
-
-            // Gönderdiğin görseldeki gibi koyu, mat arka plan
+            int x = this.getX(), y = this.getY(), w = this.getWidth(), h = this.getHeight();
             int bg = 0xFF222222; 
             ctx.fill(x + 2, y, x + w - 2, y + h, bg);
             ctx.fill(x, y + 2, x + w, y + h - 2, bg);
             ctx.fill(x + 1, y + 1, x + w - 1, y + h - 1, bg);
-
-            // Pembe-Beyaz Flop Animasyonlu Kenarlık (Dış Yapı - Köşeleri Yuvarlatılmış)
-            ctx.fill(x + 2, y, x + w - 2, y + 1, flopColor); // Üst Çizgi
-            ctx.fill(x + 2, y + h - 1, x + w - 2, y + h, flopColor); // Alt Çizgi
-            ctx.fill(x, y + 2, x + 1, y + h - 2, flopColor); // Sol Çizgi
-            ctx.fill(x + w - 1, y + 2, x + w, y + h - 2, flopColor); // Sağ Çizgi
-            
-            // Kenar Yumuşatma Noktaları (Oval Hap görünümü için)
+            ctx.fill(x + 2, y, x + w - 2, y + 1, flopColor); 
+            ctx.fill(x + 2, y + h - 1, x + w - 2, y + h, flopColor); 
+            ctx.fill(x, y + 2, x + 1, y + h - 2, flopColor); 
+            ctx.fill(x + w - 1, y + 2, x + w, y + h - 2, flopColor); 
             ctx.fill(x + 1, y + 1, x + 2, y + 2, flopColor);
             ctx.fill(x + w - 2, y + 1, x + w - 1, y + 2, flopColor);
             ctx.fill(x + 1, y + h - 2, x + 2, y + h - 1, flopColor);
             ctx.fill(x + w - 2, y + h - 2, x + w - 1, y + h - 1, flopColor);
-
-            // İkonu tam merkeze oturtarak çiz
             ctx.drawItem(this.icon, x + (w - 16) / 2, y + (h - 16) / 2);
         }
     }
@@ -248,7 +270,6 @@ public class HitX implements ClientModInitializer {
         return 0xFF000000 | (0xFF << 16) | ((int)(100 + 100 * (r / 0.6f)) << 8) | 0x22;
     }
 
-    // Metodu static yaptık ki buton sınıfından ulaşılabilsin
     public static int getPinkWhiteFlop(int o, float a) {
         double w = (Math.sin((System.currentTimeMillis() + o) / 300.0) + 1.0) / 2.0;
         return ((int)(255 * a) << 24) | (0xFF << 16) | ((int)(130 + 125 * w) << 8) | (int)(200 + 55 * w);
@@ -269,11 +290,11 @@ public class HitX implements ClientModInitializer {
         } catch (Exception e) { return null; }
     }
 
-    // Yeni buton ekleme metodumuz
     private void iconBtn(Screen s, ItemStack icon, String t, int x, int y, int w, int h, ButtonWidget.PressAction a) {
         Screens.getButtons(s).add(new FlopIconButton(x, y, w, h, icon, t, a));
     }
     
     private boolean isTrash(ItemStack s) { return s.isOf(Items.ROTTEN_FLESH) || s.isOf(Items.DIRT) || s.isOf(Items.COBBLESTONE); }
     private boolean isArmor(ItemStack s) { String n = s.getItem().toString().toLowerCase(); return n.contains("helmet") || n.contains("chestplate") || n.contains("leggings") || n.contains("boots"); }
-                    }                                                                          
+                }
+                     
