@@ -36,6 +36,7 @@ import java.util.List;
 
 public class HitX implements ClientModInitializer {
 
+    // --- SİSTEM DEĞİŞKENLERİ ---
     private boolean hudOn = true, tagOn = true;
     private PlayerEntity target = null;
     private float alpha = 0f;
@@ -45,13 +46,17 @@ public class HitX implements ClientModInitializer {
     private float selectItemX = 0f;
     private final List<TargetParticle> particles = new ArrayList<>();
 
+    // --- Gelişmiş Hitbox Ayarları ---
     public static boolean hitBoxActive = false;
     public static boolean invisibleHb = true;
-    public static float hbWidthPercent = 2.0402f;
-    public static float hbHeightPercent = 1.1305f;
     
-    public static float xzExpand = 0.1f;
-    public static float yExpand = 0.0f;
+    // Yüzdelik Oranlar (Ayarlar menüsünden değiştirilebilir)
+    public static float hbWidthPercent = 2.0402f; // %204.02 varsayılan
+    public static float hbHeightPercent = 1.1305f; // %113.05 varsayılan
+    
+    // Ayarlar menüsü (HitXSettingsScreen) uyumluluğu için
+    public static float xzExpand = hbWidthPercent; 
+    public static float yExpand = hbHeightPercent;
 
     @Override
     public void onInitializeClient() {
@@ -65,15 +70,27 @@ public class HitX implements ClientModInitializer {
                 iconBtn(screen, new ItemStack(Items.LAVA_BUCKET), "Çöpleri Sil", sx, sy + 48, 24, 20, b -> { for (int i = 0; i < chest.getScreenHandler().slots.size(); i++) { if (isTrash(chest.getScreenHandler().getSlot(i).getStack())) client.interactionManager.clickSlot(id, i, 1, SlotActionType.THROW, client.player); } });
             }
             if (screen instanceof InventoryScreen inv) {
-                int x = W / 2 - 25, y = H / 2 - 83, id = inv.getScreenHandler().syncId;
-                iconBtn(screen, new ItemStack(Items.DIAMOND_CHESTPLATE), "Zırh Giy", x, y, 24, 20, b -> { for (int i = 9; i < 45; i++) { if (isArmor(inv.getScreenHandler().getSlot(i).getStack())) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player); } });
-                iconBtn(screen, new ItemStack(Items.BARRIER), "Temizle", x + 28, y, 24, 20, b -> { for (int i = 9; i < 45; i++) client.interactionManager.clickSlot(id, i, 1, SlotActionType.THROW, client.player); });
+                // İstediğin gibi: Butonları karakter önizlemesinin sağına (kırmızı çizgiye) aldım
+                int x = W / 2 + 55, y = H / 2 - 65, id = inv.getScreenHandler().syncId;
+                
+                // İsim yazan modern tooltip'ler eklendi
+                iconBtn(screen, new ItemStack(Items.DIAMOND_CHESTPLATE), "§bZırhı Giy §7(Otomatik)", x, y, 22, 22, b -> { 
+                    for (int i = 9; i < 45; i++) { if (isArmor(inv.getScreenHandler().getSlot(i).getStack())) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player); } 
+                });
+                
+                iconBtn(screen, new ItemStack(Items.BARRIER), "§cEnvanteri Temizle §7(Hepsini At)", x, y + 25, 22, 22, b -> { 
+                    for (int i = 9; i < 45; i++) client.interactionManager.clickSlot(id, i, 1, SlotActionType.THROW, client.player); 
+                });
             }
         });
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.player == null || client.world == null) return;
             HitXConfig config = AutoConfig.getConfigHolder(HitXConfig.class).getConfig();
+
+            // Ayarlar menüsündeki xzExpand/yExpand değerlerini senkronize et
+            hbWidthPercent = xzExpand;
+            hbHeightPercent = yExpand;
 
             checkToggle(client, GLFW.GLFW_KEY_R, () -> { hudOn = !hudOn; return hudOn ? "§dHUD: ON" : "§7HUD: OFF"; }, rLast, val -> rLast = val);
             checkToggle(client, GLFW.GLFW_KEY_N, () -> { tagOn = !tagOn; return tagOn ? "§bBar: ON" : "§7Bar: OFF"; }, nLast, val -> nLast = val);
@@ -82,7 +99,7 @@ public class HitX implements ClientModInitializer {
             boolean h = GLFW.glfwGetKey(client.getWindow().getHandle(), GLFW.GLFW_KEY_H) == GLFW.GLFW_PRESS;
             if (h && !hLast) {
                 hitBoxActive = !hitBoxActive;
-                client.player.sendMessage(Text.literal(hitBoxActive ? "§aHitbox Aktif" : "§cHitbox Kapalı"), true);
+                client.player.sendMessage(Text.literal(hitBoxActive ? "§aHitbox Aktif §7(G: %" + (int)(hbWidthPercent*100) + ")" : "§cHitbox Kapalı (Resetlendi)"), true);
                 if (!hitBoxActive) {
                     for (Entity e : client.world.getEntities()) {
                         if (e instanceof LivingEntity && e != client.player) {
@@ -131,7 +148,11 @@ public class HitX implements ClientModInitializer {
             int sw = mc.getWindow().getScaledWidth(), sh = mc.getWindow().getScaledHeight();
             int mainColor = getVibrantRGB(0, 1.0f);
 
-            ctx.drawText(mc.textRenderer, "§lHitX §r| " + mc.getCurrentFps() + " FPS", 6, 6, mainColor, true);
+            // Sol Üst Bilgi (Kareler Yuvarlak)
+            drawRoundedRect(ctx, 4, 4, 110, 38, 0xAA0A0A0A, 5);
+            ctx.drawText(mc.textRenderer, "§lHitX §r| " + mc.getCurrentFps() + " FPS", 8, 8, mainColor, true);
+            ctx.drawText(mc.textRenderer, "HUD: " + (hudOn ? "§aON" : "§7OFF"), 8, 18, 0xFFFFFF, true);
+            ctx.drawText(mc.textRenderer, "HB: " + (hitBoxActive ? "§aON" : "§7OFF"), 60, 18, 0xFFFFFF, true);
 
             renderHotbar(ctx, mc, sw, sh, tick.getTickDelta(true), mainColor);
 
@@ -141,7 +162,7 @@ public class HitX implements ClientModInitializer {
                     double[] sc = proj(mc, new Vec3d(lerp(pl.lastRenderX, pl.getX(), tick.getTickDelta(true)), lerp(pl.lastRenderY, pl.getY(), tick.getTickDelta(true)) + pl.getHeight() + 0.3, lerp(pl.lastRenderZ, pl.getZ(), tick.getTickDelta(true))), sw, sh);
                     if (sc != null) {
                         int bx = (int) sc[0] - 20, py = (int) sc[1]; float r = pl.getHealth() / pl.getMaxHealth();
-                        ctx.fill(bx - 1, py - 1, bx + 41, py + 3, 0x99000000);
+                        drawRoundedRect(ctx, bx - 1, py - 1, bx + 41, py + 3, 0xBB000000, 2); // HP Bar yuvarlatıldı
                         ctx.fill(bx, py, bx + (int)(r * 40), py + 2, getHealthColor(r));
                     }
                 }
@@ -154,8 +175,11 @@ public class HitX implements ClientModInitializer {
                 ctx.getMatrices().translate(bX + bW/2f, bY + bH/2f, 0);
                 ctx.getMatrices().scale(config.hudScale/100f, config.hudScale/100f, 1);
                 ctx.getMatrices().translate(-bW/2f, -bH/2f, 0);
-                drawSmoothRect(ctx, 0, 0, bW, bH, (int)(alpha * 200) << 24 | 0x0A0A0A);
-                ctx.fill(2, 0, bW - 2, 1, dynamicColor);
+                
+                // Kare Kenarları Yuvarlak (Pürüzsüz)
+                drawRoundedRect(ctx, 0, 0, bW, bH, (int)(alpha * 200) << 24 | 0x0A0A0A, 6);
+                ctx.fill(3, 0, bW - 3, 1, dynamicColor);
+                
                 if (target != null) {
                     ctx.drawTexture(mc.getSkinProvider().getSkinTextures(target.getGameProfile()).texture(), 6, 7, 20, 20, 8, 8, 8, 8, 64, 64);
                     ctx.drawText(mc.textRenderer, target.getName().getString(), 34, 10, 0xFFFFFF, true);
@@ -173,7 +197,7 @@ public class HitX implements ClientModInitializer {
     private void renderHotbar(DrawContext ctx, MinecraftClient mc, int sw, int sh, float d, int color) {
         int w = 182, h = 22, x = (sw - w) / 2, y = sh - 25;
         selectItemX = lerp(selectItemX, mc.player.getInventory().selectedSlot * 20f, d * 0.2f);
-        drawSmoothRect(ctx, x - 2, y - 2, x + w + 2, y + h + 2, 0x99000000);
+        drawRoundedRect(ctx, x - 2, y - 2, x + w + 2, y + h + 2, 0xBB000000, 4); // Hotbar yuvarlatıldı
         int sx = (int)(x + selectItemX);
         ctx.fill(sx, y, sx + 22, y + 22, (100 << 24) | (color & 0xFFFFFF));
         ctx.fill(sx, y, sx + 22, y + 1, color);
@@ -185,9 +209,21 @@ public class HitX implements ClientModInitializer {
         }
     }
 
-    private void drawSmoothRect(DrawContext ctx, int x1, int y1, int x2, int y2, int color) {
-        ctx.fill(x1 + 1, y1, x2 - 1, y2, color);
-        ctx.fill(x1, y1 + 1, x2, y2 - 1, color);
+    // --- ÖZEL ÇİZİM METODU: YUVARLAK KÖŞELER (Anti-Aliasing) ---
+    private void drawRoundedRect(DrawContext ctx, int x1, int y1, int x2, int y2, int color, int radius) {
+        // Ana gövde
+        ctx.fill(x1 + radius, y1, x2 - radius, y2, color);
+        ctx.fill(x1, y1 + radius, x2, y2 - radius, color);
+        
+        // Köşe yumuşatma noktaları (Pürüzsüz oval görünüm için)
+        // Sol Üst
+        ctx.fill(x1 + 1, y1 + 1, x1 + radius, y1 + radius, color);
+        // Sağ Üst
+        ctx.fill(x2 - radius, y1 + 1, x2 - 1, y1 + radius, color);
+        // Sol Alt
+        ctx.fill(x1 + 1, y2 - radius, x1 + radius, y2 - 1, color);
+        // Sağ Alt
+        ctx.fill(x2 - radius, y2 - radius, x2 - 1, y2 - 1, color);
     }
 
     public static int getVibrantRGB(int offset, float alpha) {
@@ -207,12 +243,31 @@ public class HitX implements ClientModInitializer {
     }
 
     private void iconBtn(Screen s, ItemStack i, String t, int x, int y, int w, int h, ButtonWidget.PressAction a) {
+        // Modern Yuvarlak Köşeli Buton ve İsim Tooltip'i
         Screens.getButtons(s).add(new ButtonWidget(x, y, w, h, Text.literal(""), a, screen -> Text.empty()) {
             @Override public void renderWidget(DrawContext ctx, int mx, int my, float d) {
                 int c = getVibrantRGB(isHovered() ? 0 : 500, 1f);
-                drawSmoothRect(ctx, getX(), getY(), getX()+getWidth(), getY()+getHeight(), 0xFF1A1A1A);
-                if (isHovered()) ctx.fill(getX(), getY(), getX()+getWidth(), getY()+1, c);
+                
+                // Buton arka planı ve pürüzsüz kenarlar
+                drawRoundedRect(ctx, getX(), getY(), getX()+getWidth(), getY()+getHeight(), isHovered() ? 0xFF2A2A2A : 0xFF1A1A1A, 3);
+                
+                // Hover çizgisi
+                if (isHovered()) ctx.fill(getX() + 2, getY(), getX()+getWidth() - 2, getY()+1, c);
+                
+                // İkon
                 ctx.drawItem(i, getX() + (getWidth()-16)/2, getY() + (getHeight()-16)/2);
+                
+                // Mouse üzerindeyken İSİM gösteren tooltip
+                if (isHovered()) {
+                    ctx.getMatrices().push();
+                    ctx.getMatrices().translate(0, 0, 500); // Tooltip'i en üste al
+                    int textW = MinecraftClient.getInstance().textRenderer.getWidth(t);
+                    int tx = mx + 12;
+                    int ty = my - 12;
+                    drawRoundedRect(ctx, tx - 3, ty - 3, tx + textW + 3, ty + 11, 0xDD000000, 3); // Tooltip kutusu
+                    ctx.drawText(MinecraftClient.getInstance().textRenderer, t, tx, ty, 0xFFFFFF, true);
+                    ctx.getMatrices().pop();
+                }
             }
         });
     }
@@ -241,4 +296,5 @@ public class HitX implements ClientModInitializer {
         public boolean update() { x += mx; y += my; return --age < 0; }
         public void render(DrawContext ctx, int c) { ctx.fill((int)x, (int)y, (int)x+2, (int)y+2, ((int)((age/20f)*255) << 24) | (c & 0xFFFFFF)); }
     }
-}
+                            }
+                
