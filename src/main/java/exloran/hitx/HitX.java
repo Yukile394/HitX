@@ -45,13 +45,11 @@ public class HitX implements ClientModInitializer {
     private float selectItemX = 0f;
     private final List<TargetParticle> particles = new ArrayList<>();
 
-    // --- HITBOX AYARLARI ---
     public static boolean hitBoxActive = false;
     public static boolean invisibleHb = true;
     public static float hbWidthPercent = 2.0402f;
     public static float hbHeightPercent = 1.1305f;
     
-    // Ayarlar menüsü uyumluluğu (Eksik hata veren değişkenler)
     public static float xzExpand = 0.1f;
     public static float yExpand = 0.0f;
 
@@ -64,12 +62,12 @@ public class HitX implements ClientModInitializer {
                 int sx = W / 2 + 92, sy = H / 2 - 80, id = chest.getScreenHandler().syncId;
                 iconBtn(screen, new ItemStack(Items.HOPPER), "Hepsini Al", sx, sy, 24, 20, b -> { int s = chest.getScreenHandler().getInventory().size(); for (int i = 0; i < s; i++) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player); });
                 iconBtn(screen, new ItemStack(Items.CHEST), "Hepsini Koy", sx, sy + 24, 24, 20, b -> { int s = chest.getScreenHandler().getInventory().size(); for (int i = s; i < s + 36; i++) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player); });
-                iconBtn(screen, new ItemStack(Items.LAVA_BUCKET), "Çöpleri Temizle", sx, sy + 48, 24, 20, b -> { for (int i = 0; i < chest.getScreenHandler().slots.size(); i++) { ItemStack st = chest.getScreenHandler().getSlot(i).getStack(); if (isTrash(st)) client.interactionManager.clickSlot(id, i, 1, SlotActionType.THROW, client.player); } });
+                iconBtn(screen, new ItemStack(Items.LAVA_BUCKET), "Çöpleri Sil", sx, sy + 48, 24, 20, b -> { for (int i = 0; i < chest.getScreenHandler().slots.size(); i++) { if (isTrash(chest.getScreenHandler().getSlot(i).getStack())) client.interactionManager.clickSlot(id, i, 1, SlotActionType.THROW, client.player); } });
             }
             if (screen instanceof InventoryScreen inv) {
                 int x = W / 2 - 25, y = H / 2 - 83, id = inv.getScreenHandler().syncId;
                 iconBtn(screen, new ItemStack(Items.DIAMOND_CHESTPLATE), "Zırh Giy", x, y, 24, 20, b -> { for (int i = 9; i < 45; i++) { if (isArmor(inv.getScreenHandler().getSlot(i).getStack())) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player); } });
-                iconBtn(screen, new ItemStack(Items.BARRIER), "Envanteri Boşalt", x + 28, y, 24, 20, b -> { for (int i = 9; i < 45; i++) client.interactionManager.clickSlot(id, i, 1, SlotActionType.THROW, client.player); });
+                iconBtn(screen, new ItemStack(Items.BARRIER), "Temizle", x + 28, y, 24, 20, b -> { for (int i = 9; i < 45; i++) client.interactionManager.clickSlot(id, i, 1, SlotActionType.THROW, client.player); });
             }
         });
 
@@ -77,16 +75,14 @@ public class HitX implements ClientModInitializer {
             if (client.player == null || client.world == null) return;
             HitXConfig config = AutoConfig.getConfigHolder(HitXConfig.class).getConfig();
 
-            // Tuş Atamaları
-            checkToggle(client, GLFW.GLFW_KEY_R, () -> { hudOn = !hudOn; return hudOn ? "§dHUD Aktif" : "§7HUD Devre Dışı"; }, rLast, val -> rLast = val);
-            checkToggle(client, GLFW.GLFW_KEY_N, () -> { tagOn = !tagOn; return tagOn ? "§bHP Bar Aktif" : "§7HP Bar Devre Dışı"; }, nLast, val -> nLast = val);
-            checkToggle(client, GLFW.GLFW_KEY_P, () -> { config.particleOn = !config.particleOn; return config.particleOn ? "§5Efektler Aktif" : "§7Efektler Devre Dışı"; }, pLast, val -> pLast = val);
+            checkToggle(client, GLFW.GLFW_KEY_R, () -> { hudOn = !hudOn; return hudOn ? "§dHUD: ON" : "§7HUD: OFF"; }, rLast, val -> rLast = val);
+            checkToggle(client, GLFW.GLFW_KEY_N, () -> { tagOn = !tagOn; return tagOn ? "§bBar: ON" : "§7Bar: OFF"; }, nLast, val -> nLast = val);
+            checkToggle(client, GLFW.GLFW_KEY_P, () -> { config.particleOn = !config.particleOn; return config.particleOn ? "§5Efekt: ON" : "§7Efekt: OFF"; }, pLast, val -> pLast = val);
 
-            // Hitbox Toggle ve Anında Reset
             boolean h = GLFW.glfwGetKey(client.getWindow().getHandle(), GLFW.GLFW_KEY_H) == GLFW.GLFW_PRESS;
             if (h && !hLast) {
                 hitBoxActive = !hitBoxActive;
-                client.player.sendMessage(Text.literal(hitBoxActive ? "§aHitbox Açıldı" : "§cHitbox Kapatıldı"), true);
+                client.player.sendMessage(Text.literal(hitBoxActive ? "§aHitbox Aktif" : "§cHitbox Kapalı"), true);
                 if (!hitBoxActive) {
                     for (Entity e : client.world.getEntities()) {
                         if (e instanceof LivingEntity && e != client.player) {
@@ -97,11 +93,9 @@ public class HitX implements ClientModInitializer {
             }
             hLast = h;
 
-            // Otomatik Özellikler
             if (client.options.forwardKey.isPressed() && !client.player.horizontalCollision && client.player.getHungerManager().getFoodLevel() > 6) client.player.setSprinting(true);
             if (!client.player.hasStatusEffect(StatusEffects.NIGHT_VISION)) client.player.addStatusEffect(new StatusEffectInstance(StatusEffects.NIGHT_VISION, 400, 0, false, false, false));
 
-            // Hitbox Uygulama (NPC ve Botlar Dahil)
             if (hitBoxActive) {
                 for (Entity e : client.world.getEntities()) {
                     if (e instanceof LivingEntity && e != client.player && (invisibleHb || !e.isInvisible())) {
@@ -111,7 +105,6 @@ public class HitX implements ClientModInitializer {
                 }
             }
 
-            // Target Bulma
             boolean show = false;
             if (client.crosshairTarget instanceof EntityHitResult e && e.getEntity() instanceof PlayerEntity pl && pl.isAlive()) { target = pl; show = true; }
             if (!show) {
@@ -138,14 +131,10 @@ public class HitX implements ClientModInitializer {
             int sw = mc.getWindow().getScaledWidth(), sh = mc.getWindow().getScaledHeight();
             int mainColor = getVibrantRGB(0, 1.0f);
 
-            // Sol Üst Bilgi
             ctx.drawText(mc.textRenderer, "§lHitX §r| " + mc.getCurrentFps() + " FPS", 6, 6, mainColor, true);
-            ctx.drawText(mc.textRenderer, "HUD: " + (hudOn ? "§aON" : "§7OFF"), 6, 17, 0xFFFFFF, true);
-            ctx.drawText(mc.textRenderer, "HB: " + (hitBoxActive ? "§aON" : "§7OFF"), 6, 28, 0xFFFFFF, true);
 
             renderHotbar(ctx, mc, sw, sh, tick.getTickDelta(true), mainColor);
 
-            // HP Barları (Dünya Üzeri)
             if (tagOn) {
                 for (PlayerEntity pl : mc.world.getPlayers()) {
                     if (pl == mc.player || !pl.isAlive() || mc.player.distanceTo(pl) > RANGE + 2) continue;
@@ -158,7 +147,6 @@ public class HitX implements ClientModInitializer {
                 }
             }
 
-            // Target HUD
             if (alpha > 0.01f) {
                 int bW = 155, bH = 46, bX = (sw * config.hudX) / 100 - bW / 2, bY = (sh * config.hudY) / 100 - bH / 2;
                 int dynamicColor = getVibrantRGB(0, alpha);
@@ -166,10 +154,8 @@ public class HitX implements ClientModInitializer {
                 ctx.getMatrices().translate(bX + bW/2f, bY + bH/2f, 0);
                 ctx.getMatrices().scale(config.hudScale/100f, config.hudScale/100f, 1);
                 ctx.getMatrices().translate(-bW/2f, -bH/2f, 0);
-                
                 drawSmoothRect(ctx, 0, 0, bW, bH, (int)(alpha * 200) << 24 | 0x0A0A0A);
                 ctx.fill(2, 0, bW - 2, 1, dynamicColor);
-                
                 if (target != null) {
                     ctx.drawTexture(mc.getSkinProvider().getSkinTextures(target.getGameProfile()).texture(), 6, 7, 20, 20, 8, 8, 8, 8, 64, 64);
                     ctx.drawText(mc.textRenderer, target.getName().getString(), 34, 10, 0xFFFFFF, true);
@@ -199,15 +185,14 @@ public class HitX implements ClientModInitializer {
         }
     }
 
-    // --- YARDIMCI METOTLAR ---
     private void drawSmoothRect(DrawContext ctx, int x1, int y1, int x2, int y2, int color) {
         ctx.fill(x1 + 1, y1, x2 - 1, y2, color);
         ctx.fill(x1, y1 + 1, x2, y2 - 1, color);
     }
 
     public static int getVibrantRGB(int offset, float alpha) {
-        float hue = ((System.currentTimeMillis() + offset) % 5000) / 5000f;
-        int rgb = Color.HSBtoRGB(hue, 0.7f, 1.0f);
+        float hue = ((System.currentTimeMillis() + offset) % 4000) / 4000f;
+        int rgb = Color.HSBtoRGB(hue, 0.8f, 1.0f);
         return ((int)(alpha * 255) << 24) | (rgb & 0xFFFFFF);
     }
 
@@ -222,7 +207,7 @@ public class HitX implements ClientModInitializer {
     }
 
     private void iconBtn(Screen s, ItemStack i, String t, int x, int y, int w, int h, ButtonWidget.PressAction a) {
-        Screens.getButtons(s).add(new ButtonWidget(x, y, w, h, Text.literal(""), a, ButtonWidget.DEFAULT_NARRATION_SUPPLIER) {
+        Screens.getButtons(s).add(new ButtonWidget(x, y, w, h, Text.literal(""), a, screen -> Text.empty()) {
             @Override public void renderWidget(DrawContext ctx, int mx, int my, float d) {
                 int c = getVibrantRGB(isHovered() ? 0 : 500, 1f);
                 drawSmoothRect(ctx, getX(), getY(), getX()+getWidth(), getY()+getHeight(), 0xFF1A1A1A);
@@ -256,4 +241,4 @@ public class HitX implements ClientModInitializer {
         public boolean update() { x += mx; y += my; return --age < 0; }
         public void render(DrawContext ctx, int c) { ctx.fill((int)x, (int)y, (int)x+2, (int)y+2, ((int)((age/20f)*255) << 24) | (c & 0xFFFFFF)); }
     }
-                                      }
+}
