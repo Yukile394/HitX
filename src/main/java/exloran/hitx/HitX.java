@@ -89,9 +89,9 @@ public class HitX implements ClientModInitializer {
                     }
                 }
             } else {
-                // Resetleme
+                // Resetleme (HATA DÜZELTİLDİ: getXLength() yerine maxX - minX kullanıldı)
                 for (Entity e : client.world.getEntities()) {
-                    if (e instanceof LivingEntity && e != client.player && e.getBoundingBox().getXLength() > 0.7) {
+                    if (e instanceof LivingEntity && e != client.player && (e.getBoundingBox().maxX - e.getBoundingBox().minX) > 0.7) {
                         e.setBoundingBox(new Box(e.getX()-0.3, e.getY(), e.getZ()-0.3, e.getX()+0.3, e.getY()+1.8, e.getZ()+0.3));
                     }
                 }
