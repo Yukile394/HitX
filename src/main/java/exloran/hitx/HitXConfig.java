@@ -20,8 +20,12 @@ public class HitXConfig implements ConfigData {
     // --- HITBOX AYARLARI ---
     @ConfigEntry.Gui.Tooltip
     public float xzExpand = 2.0402f;
+    
     @ConfigEntry.Gui.Tooltip
     public float yExpand = 1.1305f;
+
+    @ConfigEntry.Gui.Tooltip
+    public float yOffset = 0.0f; // Hitbox Yukarı/Aşağı kaydırma ayarı
 
     public boolean fakeHitbox = false; // Fake Hitbox modu
     public boolean particleOn = true;
