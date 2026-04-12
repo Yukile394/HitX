@@ -2,9 +2,9 @@
   "required": true,
   "package": "exloran.hitx.mixin",
   "compatibilityLevel": "JAVA_21",
-  "mixins": [
-  ],
+  "mixins": [],
   "client": [
+    "HitboxMixin"
   ],
   "injectors": {
     "defaultRequire": 1
