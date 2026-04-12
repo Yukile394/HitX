@@ -4,6 +4,7 @@ import me.shedaniel.autoconfig.AutoConfig;
 import me.shedaniel.autoconfig.serializer.GsonConfigSerializer;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.client.screen.v1.Screens;
 import net.minecraft.client.MinecraftClient;
@@ -14,17 +15,15 @@ import net.minecraft.client.gui.screen.ingame.InventoryScreen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.math.Box;
 import org.lwjgl.glfw.GLFW;
-
-import java.awt.Color;
 
 public class HitX implements ClientModInitializer {
 
@@ -33,106 +32,112 @@ public class HitX implements ClientModInitializer {
     public static boolean triggerBotActive = false;
     public static boolean auraActive = false;
     
-    private boolean mLast = false, hLast = false;
+    // Alt Ayarlar
+    public static float auraRange = 3.2f;
+    public static float elytraRange = 5.5f;
+    public static boolean elytraTarget = true;
+    public static boolean showAuraParticles = true;
+
+    private boolean mLast = false;
+    private LivingEntity currentAuraTarget = null;
+    
+    // Parçacık Görseli Tanımlaması
+    private static final Identifier AURA_FX = new Identifier("hitx", "textures/gui/aura_fx.png");
 
     @Override
     public void onInitializeClient() {
         AutoConfig.register(HitXConfig.class, GsonConfigSerializer::new);
         HitXConfig config = AutoConfig.getConfigHolder(HitXConfig.class).getConfig();
 
-        // Butonlar (Sandık ve Envanter)
+        // Envanter/Sandık Hızlı Butonları
         ScreenEvents.AFTER_INIT.register((client, screen, W, H) -> {
             int bx = W / 2 + 92, by = H / 2 - 50; 
-            
             if (screen instanceof InventoryScreen inv) {
                 int id = inv.getScreenHandler().syncId;
                 iconBtn(screen, new ItemStack(Items.DIAMOND_CHESTPLATE), "§bZırhı Giy", bx, by, 22, 22, b -> {
                     for (int i = 9; i < 45; i++) if (isArmor(inv.getScreenHandler().getSlot(i).getStack())) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player);
                 });
-                iconBtn(screen, new ItemStack(Items.BARRIER), "§cHerşeyi At", bx, by + 25, 22, 22, b -> {
-                    for (int i = 9; i < 45; i++) client.interactionManager.clickSlot(id, i, 1, SlotActionType.THROW, client.player);
-                });
             }
-
             if (screen instanceof GenericContainerScreen chest) {
                 int id = chest.getScreenHandler().syncId;
                 iconBtn(screen, new ItemStack(Items.HOPPER), "§aHepsini Al", bx, by, 22, 22, b -> {
                     for (int i = 0; i < chest.getScreenHandler().getInventory().size(); i++) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player);
                 });
-                iconBtn(screen, new ItemStack(Items.CHEST), "§eHerşeyi Koy", bx, by + 25, 22, 22, b -> {
-                    int s = chest.getScreenHandler().getInventory().size();
-                    for (int i = s; i < s + 36; i++) client.interactionManager.clickSlot(id, i, 0, SlotActionType.QUICK_MOVE, client.player);
-                });
+            }
+        });
+
+        // Aura Görsel Parçacık (HUD Render)
+        HudRenderCallback.EVENT.register((ctx, tick) -> {
+            MinecraftClient mc = MinecraftClient.getInstance();
+            if (auraActive && showAuraParticles && currentAuraTarget != null && mc.player != null && !mc.options.hudHidden) {
+                int sw = mc.getWindow().getScaledWidth();
+                int sh = mc.getWindow().getScaledHeight();
+                // Ekranda hedef varken crosshair etrafında görsel çıkarır
+                ctx.drawTexture(AURA_FX, sw / 2 - 16, sh / 2 - 16, 0, 0, 32, 32, 32, 32);
             }
         });
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.player == null || client.world == null) return;
             
-            // Tuş Kontrolleri
+            // Menü Tuşu (M)
             checkToggle(client, GLFW.GLFW_KEY_M, () -> { client.setScreen(new HitXMenu()); return ""; }, mLast, v -> mLast = v);
-            checkToggle(client, GLFW.GLFW_KEY_H, () -> { config.fakeHitbox = !config.fakeHitbox; return "§7Fake Hitbox: " + (config.fakeHitbox ? "§aAÇIK" : "§cKAPALI"); }, hLast, v -> hLast = v);
 
             // Gelişmiş Hitbox Mantığı
             if (hitBoxActive) {
                 float wMul = config.xzExpand;
                 float hMul = config.yExpand;
-                float yOff = config.yOffset;
-
                 for (Entity e : client.world.getEntities()) {
                     if (e instanceof LivingEntity && e != client.player) {
                         float w = 0.6f * wMul;
                         float h = 1.8f * hMul;
-                        
                         if (config.fakeHitbox) {
-                            boolean isTargeted = client.player.distanceTo(e) < 5.0f;
-                            if (isTargeted) {
-                                e.setBoundingBox(new Box(e.getX() - w/2, e.getY() + yOff, e.getZ() - w/2, e.getX() + w/2, e.getY() + h + yOff, e.getZ() + w/2));
-                            } else {
-                                e.setBoundingBox(new Box(e.getX()-0.3, e.getY(), e.getZ()-0.3, e.getX()+0.3, e.getY()+1.8, e.getZ()+0.3));
-                            }
+                            if (client.player.distanceTo(e) < 5.0f) e.setBoundingBox(new Box(e.getX() - w/2, e.getY() + config.yOffset, e.getZ() - w/2, e.getX() + w/2, e.getY() + h + config.yOffset, e.getZ() + w/2));
+                            else e.setBoundingBox(new Box(e.getX()-0.3, e.getY(), e.getZ()-0.3, e.getX()+0.3, e.getY()+1.8, e.getZ()+0.3));
                         } else {
-                            e.setBoundingBox(new Box(e.getX() - w/2, e.getY() + yOff, e.getZ() - w/2, e.getX() + w/2, e.getY() + h + yOff, e.getZ() + w/2));
+                            e.setBoundingBox(new Box(e.getX() - w/2, e.getY() + config.yOffset, e.getZ() - w/2, e.getX() + w/2, e.getY() + h + config.yOffset, e.getZ() + w/2));
                         }
-                    }
-                }
-            } else {
-                for (Entity e : client.world.getEntities()) {
-                    if (e instanceof LivingEntity && e != client.player && (e.getBoundingBox().maxX - e.getBoundingBox().minX) > 0.7) {
-                        e.setBoundingBox(new Box(e.getX()-0.3, e.getY(), e.getZ()-0.3, e.getX()+0.3, e.getY()+1.8, e.getZ()+0.3));
                     }
                 }
             }
 
-            // Savaş Modülleri (Aura & TriggerBot)
-            if (triggerBotActive || auraActive) {
-                // Silahın bekleme süresi (cooldown) dolmuş mu kontrol et
-                if (client.player.getAttackCooldownProgress(0.5f) >= 1.0f) {
-                    Entity targetToAttack = null;
+            currentAuraTarget = null; // Her tick sıfırla
 
-                    // TriggerBot: Ekranda (Crosshair) bakılan varlık
+            // Savaş Modülleri (Aura & TriggerBot) - Anti-Cheat Korumalı
+            if (triggerBotActive || auraActive) {
+                // Sadece bekleme süresi %100 olunca vur (Log düşmesini önler)
+                if (client.player.getAttackCooldownProgress(0.5f) >= 1.0f) {
+                    LivingEntity targetToAttack = null;
+
+                    // TriggerBot
                     if (triggerBotActive && client.crosshairTarget instanceof EntityHitResult hitRes) {
                         if (hitRes.getEntity() instanceof LivingEntity le && le != client.player && le.isAlive()) {
                             targetToAttack = le;
                         }
                     }
 
-                    // Aura (KillAura): Yakındaki ilk varlık
+                    // Aura
                     if (auraActive && targetToAttack == null) {
-                        double closestDist = 20.25; // 4.5 blok menzil (Karesi)
+                        boolean isFlying = client.player.isFallFlying();
+                        double maxDist = (isFlying && elytraTarget) ? elytraRange : auraRange;
+                        double closestDist = maxDist * maxDist; 
+
                         for (Entity e : client.world.getEntities()) {
                             if (e instanceof LivingEntity le && le != client.player && le.isAlive()) {
-                                double distSq = client.player.squaredDistanceTo(le);
-                                if (distSq <= closestDist) {
-                                    closestDist = distSq;
-                                    targetToAttack = le;
+                                // Anti-Cheat Bypass: Sadece görüş açısındaysa ve duvardan geçmiyorsa vur
+                                if (client.player.canSee(e)) {
+                                    double distSq = client.player.squaredDistanceTo(le);
+                                    if (distSq <= closestDist) {
+                                        closestDist = distSq;
+                                        targetToAttack = le;
+                                    }
                                 }
                             }
                         }
                     }
 
-                    // Vurma İşlemi
                     if (targetToAttack != null) {
+                        currentAuraTarget = targetToAttack; // Görsel efekt için kaydet
                         client.interactionManager.attackEntity(client.player, targetToAttack);
                         client.player.swingHand(Hand.MAIN_HAND);
                     }
@@ -141,124 +146,142 @@ public class HitX implements ClientModInitializer {
         });
     }
 
-    // --- GELİŞMİŞ THUNDER THEME MENÜ ---
+    // --- GELİŞMİŞ PÜRÜZSÜZ SAĞ TIK MENÜSÜ ---
     public class HitXMenu extends Screen {
+        private String openSettings = ""; // Hangi modun ayarı açık?
         private int activeSlider = -1;
 
-        // ThunderHack Tema Renkleri
-        private final int TH_BG = 0xFA251B29;       // Koyu arka plan
-        private final int TH_HEADER = 0xFA32233C;   // Üst Logo Kısmı
-        private final int TH_ON = 0xFF855DA2;       // Aktif Mod rengi (Açık Mor)
-        private final int TH_OFF = 0xFF32233C;      // Kapalı Mod rengi (Koyu Mor)
-        private final int TH_SETTING = 0xFF19141E;  // Ayar arka planı
+        private final int BG_COLOR = 0xF01A1A1A;       // Pürüzsüz Koyu Arka Plan
+        private final int HEADER_COLOR = 0xFF2A2A2A;   // Üst Logo
+        private final int ACCENT_ON = 0xFF00FFBB;      // Aktif Mod (Camgöbeği)
+        private final int ACCENT_OFF = 0xFF404040;     // Kapalı Mod
+        private final int PANEL_BG = 0xFF222222;       // Sağ Panel
 
         protected HitXMenu() { super(Text.literal("HitX")); }
 
         @Override
         public void render(DrawContext ctx, int mx, int my, float d) {
             HitXConfig config = AutoConfig.getConfigHolder(HitXConfig.class).getConfig();
-            int w = 220, h = 250, x = width/2 - w/2, y = height/2 - h/2;
             
-            // Ana Arka Plan ve Header
-            drawRoundedRect(ctx, x, y, x + w, y + h, TH_BG, 8);
-            drawRoundedRect(ctx, x, y, x + w, y + 25, TH_HEADER, 8);
-            ctx.fill(x, y + 15, x + w, y + 25, TH_HEADER); // Alt kısmı düzleştirmek için
+            int w = 380, h = 220, x = width/2 - w/2, y = height/2 - h/2;
             
-            ctx.drawCenteredTextWithShadow(textRenderer, "§lTHUNDER HITX+", width/2, y + 8, 0xFFFFFF);
-
-            // Mod Butonları
-            int btnX = x + 15;
-            int btnW = w - 30;
-            int btnH = 22;
-
-            drawToggleBtn(ctx, btnX, y + 35, btnW, btnH, hitBoxActive, "Gelişmiş Hitbox");
-            drawToggleBtn(ctx, btnX, y + 62, btnW, btnH, triggerBotActive, "TriggerBot");
-            drawToggleBtn(ctx, btnX, y + 89, btnW, btnH, auraActive, "Aura (KillAura)");
-            drawToggleBtn(ctx, btnX, y + 116, btnW, btnH, config.fakeHitbox, "Gizli (Fake) Hitbox");
-
-            // Slider Alanı
-            int sx = width/2 - 80, sw = 160, sh = 8;
+            // Ana Gövde
+            drawRoundedRect(ctx, x, y, x + w, y + h, BG_COLOR, 6);
+            drawRoundedRect(ctx, x, y, x + 160, y + h, HEADER_COLOR, 6); // Sol Modül Paneli
             
-            int sy1 = y + 165;
-            ctx.drawCenteredTextWithShadow(textRenderer, "Genişlik: " + String.format("%.2f", config.xzExpand), width/2, sy1 - 12, 0xAAAAAA);
-            drawRoundedRect(ctx, sx, sy1, sx + sw, sy1 + sh, TH_SETTING, 3);
-            float fill1 = (config.xzExpand - 0.5f) / 4.5f;
-            drawRoundedRect(ctx, sx, sy1, sx + (int)(sw * fill1), sy1 + sh, TH_ON, 3);
+            ctx.drawCenteredTextWithShadow(textRenderer, "§lMODÜLLER", x + 80, y + 10, 0xFFFFFF);
 
-            int sy2 = y + 195;
-            ctx.drawCenteredTextWithShadow(textRenderer, "Yükseklik: " + String.format("%.2f", config.yExpand), width/2, sy2 - 12, 0xAAAAAA);
-            drawRoundedRect(ctx, sx, sy2, sx + sw, sy2 + sh, TH_SETTING, 3);
-            float fill2 = (config.yExpand - 0.5f) / 3.5f;
-            drawRoundedRect(ctx, sx, sy2, sx + (int)(sw * fill2), sy2 + sh, TH_ON, 3);
+            // Modül Butonları (Sol Taraf)
+            drawModuleBtn(ctx, x + 10, y + 30, 140, 24, mx, my, "Hitboxes", hitBoxActive);
+            drawModuleBtn(ctx, x + 10, y + 60, 140, 24, mx, my, "Aura", auraActive);
+            drawModuleBtn(ctx, x + 10, y + 90, 140, 24, mx, my, "TriggerBot", triggerBotActive);
 
-            int sy3 = y + 225;
-            ctx.drawCenteredTextWithShadow(textRenderer, "Yukarı/Aşağı: " + String.format("%.2f", config.yOffset), width/2, sy3 - 12, 0xAAAAAA);
-            drawRoundedRect(ctx, sx, sy3, sx + sw, sy3 + sh, TH_SETTING, 3);
-            float fill3 = (config.yOffset + 2.0f) / 4.0f;
-            drawRoundedRect(ctx, sx, sy3, sx + (int)(sw * fill3), sy3 + sh, TH_ON, 3);
-            
+            // Sağ Taraf - Ayar Paneli
+            int rx = x + 170;
+            if (openSettings.isEmpty()) {
+                ctx.drawCenteredTextWithShadow(textRenderer, "§7Ayarları görmek için", rx + 100, y + 100, 0xAAAAAA);
+                ctx.drawCenteredTextWithShadow(textRenderer, "§7modüllerin üzerine §fSAĞ TIKLA", rx + 100, y + 115, 0xAAAAAA);
+            } else {
+                ctx.drawTextWithShadow(textRenderer, "§l" + openSettings.toUpperCase() + " AYARLARI", rx, y + 10, ACCENT_ON);
+                drawRoundedRect(ctx, rx, y + 25, rx + 200, y + h - 10, PANEL_BG, 4);
+
+                if (openSettings.equals("Hitboxes")) {
+                    drawSlider(ctx, rx + 10, y + 40, 180, "Genişlik: " + String.format("%.1f", config.xzExpand), (config.xzExpand - 0.5f) / 4.5f);
+                    drawSlider(ctx, rx + 10, y + 75, 180, "Yükseklik: " + String.format("%.1f", config.yExpand), (config.yExpand - 0.5f) / 3.5f);
+                    drawSlider(ctx, rx + 10, y + 110, 180, "Y-Ekseni: " + String.format("%.1f", config.yOffset), (config.yOffset + 2.0f) / 4.0f);
+                    drawToggleBtn(ctx, rx + 10, y + 145, 180, 20, config.fakeHitbox, "Gizli (Fake) Hitbox");
+                } 
+                else if (openSettings.equals("Aura")) {
+                    drawSlider(ctx, rx + 10, y + 40, 180, "Normal Menzil: " + String.format("%.1f", auraRange), (auraRange - 2.0f) / 4.0f);
+                    drawSlider(ctx, rx + 10, y + 75, 180, "Elytra Menzili: " + String.format("%.1f", elytraRange), (elytraRange - 3.0f) / 4.0f);
+                    drawToggleBtn(ctx, rx + 10, y + 110, 180, 20, elytraTarget, "Elytra Target");
+                    drawToggleBtn(ctx, rx + 10, y + 140, 180, 20, showAuraParticles, "Görsel Parçacık (Aura_FX)");
+                }
+            }
             super.render(ctx, mx, my, d);
         }
 
+        private void drawModuleBtn(DrawContext ctx, int x, int y, int w, int h, int mx, int my, String name, boolean state) {
+            boolean hover = mx >= x && mx <= x + w && my >= y && my <= y + h;
+            int color = state ? ACCENT_ON : (hover ? 0xFF505050 : ACCENT_OFF);
+            drawRoundedRect(ctx, x, y, x + w, y + h, color, 4);
+            ctx.drawTextWithShadow(textRenderer, name, x + 10, y + 8, state ? 0x000000 : 0xFFFFFF);
+            if (openSettings.equals(name)) {
+                ctx.fill(x + w - 4, y + 4, x + w, y + h - 4, 0xFFFFFFFF); // Seçili olduğunu gösteren çizgi
+            }
+        }
+
         private void drawToggleBtn(DrawContext ctx, int x, int y, int w, int h, boolean state, String name) {
-            drawRoundedRect(ctx, x, y, x + w, y + h, state ? TH_ON : TH_OFF, 5);
-            String status = state ? "§aAÇIK" : "§7KAPALI";
-            ctx.drawTextWithShadow(textRenderer, name, x + 8, y + 7, 0xFFFFFF);
-            ctx.drawTextWithShadow(textRenderer, status, x + w - textRenderer.getWidth(status) - 8, y + 7, 0xFFFFFF);
+            drawRoundedRect(ctx, x, y, x + w, y + h, state ? 0xFF2A5A4A : 0xFF3A3A3A, 4);
+            ctx.drawTextWithShadow(textRenderer, name, x + 8, y + 6, state ? 0x00FFBB : 0xAAAAAA);
+        }
+
+        private void drawSlider(DrawContext ctx, int x, int y, int w, String text, float percent) {
+            ctx.drawTextWithShadow(textRenderer, text, x, y, 0xFFFFFF);
+            drawRoundedRect(ctx, x, y + 12, x + w, y + 20, 0xFF111111, 3);
+            drawRoundedRect(ctx, x, y + 12, x + (int)(w * percent), y + 20, ACCENT_ON, 3);
         }
 
         @Override
         public boolean mouseClicked(double mx, double my, int btn) {
             HitXConfig config = AutoConfig.getConfigHolder(HitXConfig.class).getConfig();
-            int w = 220, h = 250;
-            int x = width/2 - w/2;
-            int y = height/2 - h/2;
-            
-            int btnX = x + 15;
-            int btnW = w - 30;
-            int btnH = 22;
+            int w = 380, h = 220, x = width/2 - w/2, y = height/2 - h/2;
+            int rx = x + 170;
 
-            // Toggles Tıklama Kontrolü
-            if (mx >= btnX && mx <= btnX + btnW) {
-                if (my >= y + 35 && my <= y + 35 + btnH) { hitBoxActive = !hitBoxActive; return true; }
-                if (my >= y + 62 && my <= y + 62 + btnH) { triggerBotActive = !triggerBotActive; return true; }
-                if (my >= y + 89 && my <= y + 89 + btnH) { auraActive = !auraActive; return true; }
-                if (my >= y + 116 && my <= y + 116 + btnH) { config.fakeHitbox = !config.fakeHitbox; return true; }
-            }
+            // Sol Taraf Modül Tıklamaları
+            checkModClick(mx, my, btn, x + 10, y + 30, 140, 24, "Hitboxes", () -> hitBoxActive = !hitBoxActive);
+            checkModClick(mx, my, btn, x + 10, y + 60, 140, 24, "Aura", () -> auraActive = !auraActive);
+            checkModClick(mx, my, btn, x + 10, y + 90, 140, 24, "TriggerBot", () -> triggerBotActive = !triggerBotActive);
 
-            // Slider Tıklama Kontrolleri
-            int sx = width/2 - 80, sw = 160;
-            if (mx >= sx - 5 && mx <= sx + sw + 5) {
-                if (my >= y + 155 && my <= y + 175) { activeSlider = 0; updateSlider(mx); return true; }
-                if (my >= y + 185 && my <= y + 205) { activeSlider = 1; updateSlider(mx); return true; }
-                if (my >= y + 215 && my <= y + 235) { activeSlider = 2; updateSlider(mx); return true; }
+            // Sağ Taraf Ayar Tıklamaları
+            if (openSettings.equals("Hitboxes")) {
+                if (mx >= rx + 10 && mx <= rx + 190) {
+                    if (my >= y + 52 && my <= y + 60) { activeSlider = 0; updateSlider(mx, rx + 10); return true; }
+                    if (my >= y + 87 && my <= y + 95) { activeSlider = 1; updateSlider(mx, rx + 10); return true; }
+                    if (my >= y + 122 && my <= y + 130) { activeSlider = 2; updateSlider(mx, rx + 10); return true; }
+                    if (my >= y + 145 && my <= y + 165 && btn == 0) { config.fakeHitbox = !config.fakeHitbox; return true; }
+                }
+            } else if (openSettings.equals("Aura")) {
+                if (mx >= rx + 10 && mx <= rx + 190) {
+                    if (my >= y + 52 && my <= y + 60) { activeSlider = 3; updateSlider(mx, rx + 10); return true; }
+                    if (my >= y + 87 && my <= y + 95) { activeSlider = 4; updateSlider(mx, rx + 10); return true; }
+                    if (my >= y + 110 && my <= y + 130 && btn == 0) { elytraTarget = !elytraTarget; return true; }
+                    if (my >= y + 140 && my <= y + 160 && btn == 0) { showAuraParticles = !showAuraParticles; return true; }
+                }
             }
             return super.mouseClicked(mx, my, btn);
         }
 
-        @Override
-        public boolean mouseReleased(double mx, double my, int btn) {
-            activeSlider = -1;
-            return super.mouseReleased(mx, my, btn);
+        private void checkModClick(double mx, double my, int btn, int bx, int by, int bw, int bh, String modName, Runnable toggleAction) {
+            if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) {
+                if (btn == 0) toggleAction.run(); // Sol tık aç/kapat
+                else if (btn == 1) openSettings = modName; // Sağ tık ayarları aç
+            }
         }
+
+        @Override
+        public boolean mouseReleased(double mx, double my, int btn) { activeSlider = -1; return super.mouseReleased(mx, my, btn); }
 
         @Override
         public boolean mouseDragged(double mx, double my, int btn, double dx, double dy) {
             if (activeSlider != -1) {
-                updateSlider(mx);
+                int w = 380, x = width/2 - w/2;
+                updateSlider(mx, x + 180);
                 return true;
             }
             return super.mouseDragged(mx, my, btn, dx, dy);
         }
 
-        private void updateSlider(double mx) {
+        private void updateSlider(double mx, int startX) {
             HitXConfig config = AutoConfig.getConfigHolder(HitXConfig.class).getConfig();
-            float p = (float)(mx - (width/2 - 80)) / 160f;
+            float p = (float)(mx - startX) / 180f;
             p = Math.max(0, Math.min(1, p));
 
             if (activeSlider == 0) config.xzExpand = 0.5f + (p * 4.5f);
             else if (activeSlider == 1) config.yExpand = 0.5f + (p * 3.5f);
             else if (activeSlider == 2) config.yOffset = -2.0f + (p * 4.0f);
+            else if (activeSlider == 3) auraRange = 2.0f + (p * 4.0f);
+            else if (activeSlider == 4) elytraRange = 3.0f + (p * 4.0f);
         }
     }
 
@@ -288,5 +311,4 @@ public class HitX implements ClientModInitializer {
         String n = s.getItem().toString(); 
         return n.contains("helmet") || n.contains("chestplate") || n.contains("leggings") || n.contains("boots"); 
     }
-                            }
-            
+}
