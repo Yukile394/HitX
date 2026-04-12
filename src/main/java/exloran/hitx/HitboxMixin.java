@@ -53,4 +53,3 @@ public class HitboxMixin {
         cir.setReturnValue(expanded);
     }
 }
-
