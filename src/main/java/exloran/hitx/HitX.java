@@ -2,381 +2,481 @@ package exloran.hitx;
 
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
-import net.minecraft.util.Identifier;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.hit.EntityHitResult;
+import net.minecraft.util.hit.HitResult;
 import org.lwjgl.glfw.GLFW;
-
-import java.util.ArrayList;
-import java.util.List;
 
 public class HitX implements ClientModInitializer {
 
-    // ── Modül Durumları ──────────────────────────────────────────────────────
+    // ═══════════════════════════════════════════
+    //  MODÜL DURUMLARI
+    // ═══════════════════════════════════════════
     public static boolean auraActive      = false;
     public static boolean criticalsActive = false;
     public static boolean hitBoxActive    = false;
-    public static boolean antiKBActive    = false;
-    public static boolean speedActive     = false;
+    public static boolean triggerActive   = false;
     public static boolean elytraTarget    = true;
 
-    // ── Ayarlar ──────────────────────────────────────────────────────────────
-    public static float auraRange    = 3.8f;
-    public static float hitboxSize   = 0.6f;
-    public static float attackDelay  = 0.5f;
+    // ═══════════════════════════════════════════
+    //  AYARLAR
+    // ═══════════════════════════════════════════
+    public static float auraRange   = 3.8f;   // KillAura menzil
+    public static float hitboxSize  = 0.4f;   // HitBox genişletme
+    public static int   critMode    = 0;       // 0 = packet, 1 = jump
 
-    // ── İç Değişkenler ───────────────────────────────────────────────────────
+    // ═══════════════════════════════════════════
+    //  İÇ DEĞİŞKENLER
+    // ═══════════════════════════════════════════
     private boolean      menuKeyLast  = false;
     private LivingEntity auraTarget   = null;
-    private int          criticalTick = 0;
-    private int          antiKBTick   = 0;
+    private double       rotationYaw  = 0;     // hedef etrafında dönme açısı
+    private int          critTick     = 0;
+    private int          auraTick     = 0;
 
-    // ── Texture (sadece GUI_BG) ───────────────────────────────────────────────
-    private static final Identifier GUI_BG =
-            Identifier.of("hitx", "textures/gui/gui_bg.png");
-
-    // ─────────────────────────────────────────────────────────────────────────
+    // ═══════════════════════════════════════════
+    //  INIT
+    // ═══════════════════════════════════════════
     @Override
     public void onInitializeClient() {
 
-        // ── WORLD RENDER ────────────────────────────────────────────────────
-        WorldRenderEvents.LAST.register(context -> {
-            // Gelecekte render efektleri buraya eklenebilir
-        });
-
-        // ── CLIENT TICK ─────────────────────────────────────────────────────
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.player == null || client.world == null) return;
 
-            // Menü: M tuşu
-            boolean menuKey = GLFW.glfwGetKey(
+            // ── M tuşu → Menü ──────────────────────────────────────
+            boolean mKey = GLFW.glfwGetKey(
                     client.getWindow().getHandle(), GLFW.GLFW_KEY_M)
                     == GLFW.GLFW_PRESS;
-            if (menuKey && !menuKeyLast) {
+            if (mKey && !menuKeyLast) {
                 client.setScreen(new ModernGui());
             }
-            menuKeyLast = menuKey;
+            menuKeyLast = mKey;
 
-            // ── CRITICALS ────────────────────────────────────────────────────
-            // Her vuruşta yerden küçük paket zıplaması → garanti kritik
-            if (criticalsActive && client.player.isOnGround()) {
-                criticalTick++;
-                if (criticalTick % 2 == 0) {
-                    client.player.jump(); // micro-jump
-                }
-            }
+            auraTick++;
 
-            // ── ANTI-KNOCKBACK ───────────────────────────────────────────────
-            // Gelen itmeyi velocity sıfırlayarak baskıla
-            if (antiKBActive) {
-                antiKBTick++;
-                if (antiKBTick % 4 == 0) {
-                    client.player.setVelocity(
-                            client.player.getVelocity().multiply(0.0, 1.0, 0.0));
-                }
-            }
-
-            // ── GELIŞMIŞ KILLAURA + ELYTRA TARGET ───────────────────────────
+            // ══════════════════════════════════════════════
+            //  KILLAURA — En yakın hedefi seç, etrafında
+            //  dönerek (yaw rotasyon) vur, elytra desteği
+            // ══════════════════════════════════════════════
             if (auraActive) {
-                double range = (client.player.isFallFlying() && elytraTarget)
-                        ? 6.0 : auraRange;
+                double range = (client.player.isFallFlying() && elytraTarget) ? 6.0 : auraRange;
 
-                auraTarget = null;
-                LivingEntity bestTarget = null;
-                double closestDist = Double.MAX_VALUE;
-
-                // En yakın geçerli hedefi seç
+                // Hedef seç: en yakın living entity
+                LivingEntity best = null;
+                double bestDist = Double.MAX_VALUE;
                 for (Entity e : client.world.getEntities()) {
                     if (!(e instanceof LivingEntity le)) continue;
                     if (le == client.player)              continue;
                     if (!le.isAlive())                    continue;
-
-                    double dist = client.player.distanceTo(le);
-                    if (dist <= range && client.player.canSee(le)) {
-                        if (dist < closestDist) {
-                            closestDist = dist;
-                            bestTarget  = le;
-                        }
+                    double d = client.player.distanceTo(le);
+                    if (d <= range && d < bestDist) {
+                        bestDist = d;
+                        best = le;
                     }
                 }
+                auraTarget = best;
 
-                if (bestTarget != null) {
-                    auraTarget = bestTarget;
+                if (best != null) {
+                    // ── Hedefe doğru smooth yaw rotasyonu ──
+                    double dx = best.getX() - client.player.getX();
+                    double dz = best.getZ() - client.player.getZ();
+                    double dy = (best.getY() + best.getHeight() * 0.5)
+                              - (client.player.getY() + client.player.getEyeHeight(client.player.getPose()));
 
-                    // Anti-cheat dostu saldırı hızı kontrolü
-                    float cooldown = client.player.getAttackCooldownProgress(attackDelay);
-                    if (cooldown >= 1.0f) {
-                        client.interactionManager.attackEntity(client.player, bestTarget);
+                    double targetYaw   = Math.toDegrees(Math.atan2(-dx, dz));
+                    double targetPitch = Math.toDegrees(-Math.atan2(dy,
+                                          Math.sqrt(dx * dx + dz * dz)));
+
+                    // Smooth — her tick biraz yaklaş (anti-cheat dostu)
+                    float currentYaw   = client.player.getYaw();
+                    float currentPitch = client.player.getPitch();
+
+                    float newYaw   = lerpAngle(currentYaw,   (float) targetYaw,   0.4f);
+                    float newPitch = lerpAngle(currentPitch, (float) targetPitch, 0.4f);
+
+                    client.player.setYaw(newYaw);
+                    client.player.setPitch(MathHelper.clamp(newPitch, -90f, 90f));
+
+                    // Dönen yaw referansı (görsel için)
+                    rotationYaw += 8.0;
+
+                    // ── Saldırı (cooldown dolunca) ──
+                    float cd = client.player.getAttackCooldownProgress(0.5f);
+                    if (cd >= 1.0f) {
+                        // Criticals varsa önce packet jump
+                        if (criticalsActive && client.player.isOnGround()) {
+                            sendCriticalPackets(client);
+                        }
+                        client.interactionManager.attackEntity(client.player, best);
                         client.player.swingHand(Hand.MAIN_HAND);
                     }
                 }
+            } else {
+                auraTarget = null;
             }
+
+            // ══════════════════════════════════════════════
+            //  TRIGGERBOT — Nişan hedefindeyse otomatik vur
+            // ══════════════════════════════════════════════
+            if (triggerActive) {
+                HitResult hr = client.crosshairTarget;
+                if (hr instanceof EntityHitResult ehr) {
+                    Entity target = ehr.getEntity();
+                    if (target instanceof LivingEntity le && le.isAlive()) {
+                        float cd = client.player.getAttackCooldownProgress(0.5f);
+                        if (cd >= 1.0f) {
+                            if (criticalsActive && client.player.isOnGround()) {
+                                sendCriticalPackets(client);
+                            }
+                            client.interactionManager.attackEntity(client.player, le);
+                            client.player.swingHand(Hand.MAIN_HAND);
+                        }
+                    }
+                }
+            }
+
+            // ══════════════════════════════════════════════
+            //  HITBOXES — Tüm entity'lerin box'ını genişlet
+            //  (EntityDimensions mixin gerekir, burada flag)
+            // ══════════════════════════════════════════════
+            // hitBoxActive flag'i → HitboxMixin tarafından kullanılır
+            // (aşağıda mixin sınıfı örneği var)
         });
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  MODERN GUI
-    // ─────────────────────────────────────────────────────────────────────────
+    // ═══════════════════════════════════════════
+    //  YARDIMCI: Kritik paket hilesi
+    //  Yerden küçük yükseklik paketi gönder →
+    //  sunucu "havada" zannetsin → kritik kayıt
+    // ═══════════════════════════════════════════
+    private void sendCriticalPackets(MinecraftClient client) {
+        if (client.getNetworkHandler() == null) return;
+        double x = client.player.getX();
+        double y = client.player.getY();
+        double z = client.player.getZ();
+
+        // 3 aşamalı micro-hop (NCP bypass)
+        client.getNetworkHandler().sendPacket(
+                new PlayerMoveC2SPacket.PositionAndOnGround(x, y + 0.0625, z, false));
+        client.getNetworkHandler().sendPacket(
+                new PlayerMoveC2SPacket.PositionAndOnGround(x, y + 0.0, z, false));
+        client.getNetworkHandler().sendPacket(
+                new PlayerMoveC2SPacket.PositionAndOnGround(x, y - 0.0625, z, false));
+        client.getNetworkHandler().sendPacket(
+                new PlayerMoveC2SPacket.PositionAndOnGround(x, y, z, true));
+    }
+
+    // ═══════════════════════════════════════════
+    //  YARDIMCI: Açı lerp (sarma destekli)
+    // ═══════════════════════════════════════════
+    private float lerpAngle(float from, float to, float t) {
+        float delta = ((to - from) % 360 + 540) % 360 - 180;
+        return from + delta * t;
+    }
+
+    // ═══════════════════════════════════════════
+    //  MODERN GUI — Saf drawContext, PNG YOK
+    // ═══════════════════════════════════════════
     public class ModernGui extends Screen {
 
-        // Kart boyutları (görsele birebir uygun)
-        private static final int CARD_W = 300;
-        private static final int CARD_H = 380;
+        // Kart boyutu
+        private static final int W = 260;
+        private static final int H = 310;
 
-        // Modül satır ayarları
-        private static final int ROW_H    = 42;
-        private static final int ROW_PADX = 18;
-        private static final int ROW_PADY = 56; // ilk satır Y offseti
-
-        // Seçili modül (ayar paneli için)
-        private int selectedModule = -1;
-
-        // Modül isimleri ve durumları (dizi → kolay genişleme)
-        private final String[] moduleNames = {
-                "KillAura", "Criticals", "HitBoxes", "Anti-KB", "Speed"
+        // Modüller: isim, aktif getter/setter referansı yoktur (switch kullanır)
+        private static final String[] NAMES = {
+            "KillAura", "TriggerBot", "Criticals", "HitBoxes"
         };
+
+        // Seçili satır (ayar açma)
+        private int selected = -1;
+
+        // Fare yeri (hover efekti için)
+        private int hoverRow = -1;
 
         protected ModernGui() {
             super(Text.literal("HitX"));
         }
 
-        // ── Yardımcı: modül aktif mi? ────────────────────────────────────────
-        private boolean isActive(int id) {
-            return switch (id) {
+        // ── Aktif mi? ───────────────────────────────
+        private boolean getState(int i) {
+            return switch (i) {
                 case 0 -> auraActive;
-                case 1 -> criticalsActive;
-                case 2 -> hitBoxActive;
-                case 3 -> antiKBActive;
-                case 4 -> speedActive;
+                case 1 -> triggerActive;
+                case 2 -> criticalsActive;
+                case 3 -> hitBoxActive;
                 default -> false;
             };
         }
 
-        private void toggle(int id) {
-            switch (id) {
+        private void toggle(int i) {
+            switch (i) {
                 case 0 -> auraActive      = !auraActive;
-                case 1 -> criticalsActive = !criticalsActive;
-                case 2 -> hitBoxActive    = !hitBoxActive;
-                case 3 -> antiKBActive    = !antiKBActive;
-                case 4 -> speedActive     = !speedActive;
+                case 1 -> triggerActive   = !triggerActive;
+                case 2 -> criticalsActive = !criticalsActive;
+                case 3 -> hitBoxActive    = !hitBoxActive;
             }
         }
 
-        // ── RENDER ───────────────────────────────────────────────────────────
+        // ── Ana Render ──────────────────────────────
         @Override
         public void render(DrawContext ctx, int mx, int my, float delta) {
-            int cx = (width  - CARD_W) / 2;
-            int cy = (height - CARD_H) / 2;
+            int cx = (width  - W) / 2;
+            int cy = (height - H) / 2;
 
-            // 1. Arka plan dokusu (tam kart boyutu)
-            ctx.drawTexture(GUI_BG, cx, cy, 0, 0, CARD_W, CARD_H, CARD_W, CARD_H);
+            // Hover satırını hesapla
+            hoverRow = -1;
+            for (int i = 0; i < NAMES.length; i++) {
+                int ry = cy + 52 + i * 54;
+                if (mx >= cx + 12 && mx <= cx + W - 12
+                 && my >= ry      && my <= ry + 44) {
+                    hoverRow = i;
+                }
+            }
 
-            // 2. Başlık — görseldeki "⚔ Combat" yazısına uygun
-            int titleColor = 0xFFD580FF; // lila/pembe
+            // ── 1. Kart arka planı ─────────────────
+            // Dış gölge (birkaç katman koyu fill)
+            for (int s = 6; s > 0; s--) {
+                int alpha = 0x18 * (7 - s);
+                ctx.fill(cx - s, cy - s, cx + W + s, cy + H + s,
+                         (alpha << 24));
+            }
+            // Ana kart
+            drawRoundRect(ctx, cx, cy, W, H, 14, 0xFF0D0018);
+
+            // Mor kenar çizgisi
+            drawRoundRectBorder(ctx, cx, cy, W, H, 14, 0xFFCC44FF, 2);
+
+            // ── 2. Başlık alanı ────────────────────
+            // Başlık gradient şeridi
+            ctx.fill(cx + 14, cy, cx + W - 14, cy + 1, 0xFFCC44FF);
+            drawRoundRect(ctx, cx, cy, W, 44, 14, 0xFF160025);
+            ctx.fill(cx, cy + 30, cx + W, cy + 44, 0xFF0D0018); // düz köşe alt
+
+            // ⚔ simge (kılıç karakteri) + başlık
             ctx.drawCenteredTextWithShadow(
                     textRenderer,
-                    "⚔  Combat",
-                    cx + CARD_W / 2,
-                    cy + 16,
-                    titleColor
+                    "§d✦ §fHITX §7PREMIUM §d✦",
+                    cx + W / 2,
+                    cy + 15,
+                    0xFFFFFFFF
             );
 
-            // 3. Her modül satırını çiz
-            for (int i = 0; i < moduleNames.length; i++) {
-                drawModuleRow(ctx, cx, cy, i, mx, my);
+            // Versiyon
+            ctx.drawCenteredTextWithShadow(
+                    textRenderer, "§8v2.0  |  M to toggle",
+                    cx + W / 2, cy + 30, 0xFF444455);
+
+            // ── 3. Modül Satırları ─────────────────
+            for (int i = 0; i < NAMES.length; i++) {
+                drawRow(ctx, cx, cy, i);
             }
 
-            // 4. Seçili modülün sağ/alt ayar paneli
-            if (selectedModule >= 0) {
-                drawSettingsPanel(ctx, cx, cy);
+            // ── 4. Seçili modül ayar paneli ────────
+            if (selected >= 0) {
+                drawSettings(ctx, cx, cy);
             }
+
+            // ── 5. Alt bilgi ───────────────────────
+            ctx.drawCenteredTextWithShadow(
+                    textRenderer,
+                    "§8Left: toggle  |  Right: settings",
+                    cx + W / 2, cy + H - 14, 0xFF333344
+            );
 
             super.render(ctx, mx, my, delta);
         }
 
-        // ── Modül Satırı ─────────────────────────────────────────────────────
-        private void drawModuleRow(DrawContext ctx, int cx, int cy,
-                                   int idx, int mx, int my) {
-            int rx = cx + ROW_PADX;
-            int ry = cy + ROW_PADY + idx * ROW_H;
-            int rw = CARD_W - ROW_PADX * 2;
-            int rh = ROW_H - 6;
+        // ── Modül Satırı ────────────────────────────
+        private void drawRow(DrawContext ctx, int cx, int cy, int idx) {
+            boolean active  = getState(idx);
+            boolean hover   = (hoverRow == idx);
+            boolean sel     = (selected == idx);
 
-            boolean active  = isActive(idx);
-            boolean hovered = mx >= rx && mx <= rx + rw
-                           && my >= ry && my <= ry + rh;
-            boolean selected = selectedModule == idx;
+            int rx = cx + 12;
+            int ry = cy + 52 + idx * 54;
+            int rw = W - 24;
+            int rh = 44;
 
-            // Satır dolgu rengi
-            int bgColor;
-            if (selected)     bgColor = 0xCC1A0030;   // seçili: koyu mor
-            else if (hovered) bgColor = 0xAA1C1C2E;   // hover: biraz açık
-            else              bgColor = 0x99101020;    // normal: koyu
+            // Arka plan
+            int bg = sel   ? 0xCC1A0035 :
+                     hover ? 0xAA130028 :
+                             0x99090015;
+            drawRoundRect(ctx, rx, ry, rw, rh, 8, bg);
 
-            // Yuvarlak köşe efekti (3 farklılı iç içe fill)
-            ctx.fill(rx + 2, ry,     rx + rw - 2, ry + rh,     bgColor);
-            ctx.fill(rx,     ry + 2, rx + rw,     ry + rh - 2, bgColor);
-
-            // Aktifken sol kenar çizgisi (yeşil)
+            // Sol aktif çizgisi
             if (active) {
-                ctx.fill(rx, ry + 2, rx + 3, ry + rh - 2, 0xFF44FF88);
+                ctx.fill(rx, ry + 6, rx + 3, ry + rh - 6, 0xFFCC44FF);
+                // Parlama efekti
+                ctx.fill(rx, ry + 6, rx + 1, ry + rh - 6, 0x88FF88FF);
             }
 
             // Modül adı
-            int textColor = active ? 0xFFEEEEEE : 0xFF888899;
+            int nameColor = active ? 0xFFFFFFFF : 0xFF888899;
             ctx.drawTextWithShadow(
-                    textRenderer,
-                    moduleNames[idx],
-                    rx + 14,
-                    ry + rh / 2 - 4,
-                    textColor
+                    textRenderer, NAMES[idx],
+                    rx + 16, ry + rh / 2 - 4, nameColor
             );
 
-            // Toggle butonu (sağ taraf)
-            drawToggle(ctx, rx + rw - 36, ry + rh / 2 - 6, active);
-
-            // Aktif ise küçük "ON" rozeti
+            // Durum etiketi
             if (active) {
-                int bx = rx + rw - 76;
-                int by = ry + rh / 2 - 5;
-                ctx.fill(bx, by, bx + 24, by + 11, 0xAA003322);
-                ctx.drawText(textRenderer, "ON", bx + 4, by + 2, 0xFF44FF88, false);
+                int lx = rx + rw - 80;
+                int ly = ry + rh / 2 - 6;
+                ctx.fill(lx, ly, lx + 30, ly + 13, 0xAA220044);
+                ctx.fill(lx, ly, lx + 30, ly + 1,  0xFFCC44FF);
+                ctx.drawCenteredTextWithShadow(
+                        textRenderer, "§dON", lx + 15, ly + 3, 0xFFCC44FF);
             }
+
+            // Toggle switch (sağ taraf)
+            drawSwitch(ctx, rx + rw - 42, ry + rh / 2 - 7, active);
         }
 
-        // ── Toggle Switch ────────────────────────────────────────────────────
-        private void drawToggle(DrawContext ctx, int x, int y, boolean on) {
-            int trackColor = on ? 0xAA6600CC : 0xAA333344;
-            int knobColor  = on ? 0xFFCC66FF : 0xFF666677;
+        // ── Toggle Switch ────────────────────────────
+        private void drawSwitch(DrawContext ctx, int x, int y, boolean on) {
+            // Track
+            int trackBg = on ? 0xAA660099 : 0xAA222233;
+            ctx.fill(x,      y + 3,  x + 30, y + 11, trackBg);
+            ctx.fill(x + 1,  y + 2,  x + 29, y + 12, trackBg);
 
-            // İz (track)
-            ctx.fill(x,      y + 2, x + 28, y + 10, trackColor);
-            ctx.fill(x + 1,  y + 1, x + 27, y + 11, 0x00000000); // şeffaf kenar
-
-            // Top (knob)
-            int kx = on ? x + 16 : x + 2;
-            ctx.fill(kx,     y,     kx + 10, y + 12, knobColor);
-            ctx.fill(kx + 1, y + 1, kx + 9,  y + 11, on ? 0xFFDD88FF : 0xFF888899);
+            // Knob
+            int kx = on ? x + 17 : x + 2;
+            int knobColor = on ? 0xFFDD66FF : 0xFF555566;
+            ctx.fill(kx,     y,     kx + 11, y + 14, knobColor);
+            ctx.fill(kx + 1, y + 1, kx + 10, y + 13,
+                     on ? 0xFFFFAAFF : 0xFF777788);
         }
 
-        // ── Ayar Paneli ──────────────────────────────────────────────────────
-        private void drawSettingsPanel(DrawContext ctx, int cx, int cy) {
-            if (selectedModule < 0) return;
+        // ── Ayar Paneli ─────────────────────────────
+        private void drawSettings(DrawContext ctx, int cx, int cy) {
+            int px = cx + 12;
+            int py = cy + 52 + NAMES.length * 54 + 4;
+            int pw = W - 24;
+            int ph = 68;
 
-            int px = cx + ROW_PADX;
-            int py = cy + ROW_PADY + moduleNames.length * ROW_H + 6;
-            int pw = CARD_W - ROW_PADX * 2;
-            int ph = 70;
-
-            // Panel arka planı
-            ctx.fill(px, py, px + pw, py + ph, 0xCC0D0020);
-            ctx.fill(px, py, px + pw, py + 1,  0x88AA44FF); // üst çizgi
+            drawRoundRect(ctx, px, py, pw, ph, 8, 0xCC0A0020);
+            ctx.fill(px, py, px + pw, py + 2, 0xFFCC44FF);
 
             ctx.drawTextWithShadow(
                     textRenderer,
-                    "§d⚙  " + moduleNames[selectedModule] + " §7Settings",
-                    px + 8, py + 8, 0xFFDDDDDD
+                    "§d⚙ §f" + NAMES[selected] + " §7Settings",
+                    px + 10, py + 8, 0xFFDDDDFF
             );
 
-            // KillAura'ya özel ayar: Range
-            if (selectedModule == 0) {
-                ctx.drawText(textRenderer,
-                        "Range: §a" + String.format("%.1f", auraRange) + " §7blocks",
-                        px + 8, py + 26, 0xFFBBBBBB, false);
-                ctx.drawText(textRenderer,
-                        "ElytraTarget: " + (elytraTarget ? "§aON" : "§cOFF"),
-                        px + 8, py + 42, 0xFFBBBBBB, false);
-                ctx.drawText(textRenderer,
-                        "[-]  [+]   Click to toggle Elytra",
-                        px + 8, py + 54, 0xFF666688, false);
-            }
-            // Hitbox ayarı
-            else if (selectedModule == 2) {
-                ctx.drawText(textRenderer,
-                        "HitboxSize: §a" + String.format("%.2f", hitboxSize),
-                        px + 8, py + 26, 0xFFBBBBBB, false);
-                ctx.drawText(textRenderer,
-                        "[-]  [+]   to adjust size",
-                        px + 8, py + 42, 0xFF666688, false);
-            }
-            else {
-                ctx.drawText(textRenderer,
-                        "§7No configurable options.",
-                        px + 8, py + 30, 0xFF555566, false);
+            switch (selected) {
+                case 0 -> { // KillAura
+                    ctx.drawText(textRenderer,
+                            "§7Range: §d" + String.format("%.1f", auraRange) + " §8blocks",
+                            px + 10, py + 24, 0xFFCCCCCC, false);
+                    ctx.drawText(textRenderer,
+                            "§8[§f-§8] §7decrease   §8[§f+§8] §7increase",
+                            px + 10, py + 38, 0xFF888899, false);
+                    ctx.drawText(textRenderer,
+                            "§7ElytraTarget: " + (elytraTarget ? "§dON" : "§8OFF"),
+                            px + 10, py + 52, 0xFFAAAAAA, false);
+                }
+                case 2 -> { // Criticals
+                    ctx.drawText(textRenderer,
+                            "§7Mode: §d" + (critMode == 0 ? "Packet (NCP)" : "Jump"),
+                            px + 10, py + 24, 0xFFCCCCCC, false);
+                    ctx.drawText(textRenderer,
+                            "§8[§fClick§8] §7to switch mode",
+                            px + 10, py + 38, 0xFF888899, false);
+                    ctx.drawText(textRenderer,
+                            "§8Packet mode = more compatible",
+                            px + 10, py + 52, 0xFF555566, false);
+                }
+                case 3 -> { // HitBoxes
+                    ctx.drawText(textRenderer,
+                            "§7Size: §d+" + String.format("%.2f", hitboxSize),
+                            px + 10, py + 24, 0xFFCCCCCC, false);
+                    ctx.drawText(textRenderer,
+                            "§8[§f-§8] §7smaller   §8[§f+§8] §7larger",
+                            px + 10, py + 38, 0xFF888899, false);
+                    ctx.drawText(textRenderer,
+                            "§8Requires HitboxMixin enabled",
+                            px + 10, py + 52, 0xFF555566, false);
+                }
+                default -> ctx.drawText(textRenderer,
+                        "§8No settings available.",
+                        px + 10, py + 30, 0xFF444455, false);
             }
         }
 
-        // ── MOUSE CLICK ──────────────────────────────────────────────────────
+        // ── Mouse Click ─────────────────────────────
         @Override
         public boolean mouseClicked(double mx, double my, int button) {
-            int cx = (width  - CARD_W) / 2;
-            int cy = (height - CARD_H) / 2;
+            int cx = (width  - W) / 2;
+            int cy = (height - H) / 2;
 
-            for (int i = 0; i < moduleNames.length; i++) {
-                int rx = cx + ROW_PADX;
-                int ry = cy + ROW_PADY + i * ROW_H;
-                int rw = CARD_W - ROW_PADX * 2;
-                int rh = ROW_H - 6;
+            for (int i = 0; i < NAMES.length; i++) {
+                int rx = cx + 12;
+                int ry = cy + 52 + i * 54;
+                int rw = W - 24;
+                int rh = 44;
 
                 if (mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh) {
-                    if (button == 0) {          // Sol tık → toggle
-                        toggle(i);
-                    } else if (button == 1) {   // Sağ tık → ayar paneli
-                        selectedModule = (selectedModule == i) ? -1 : i;
-                    }
+                    if (button == 0) toggle(i);              // Sol tık: toggle
+                    else if (button == 1)                    // Sağ tık: ayarlar
+                        selected = (selected == i) ? -1 : i;
                     return true;
                 }
             }
 
-            // Ayar panelindeki [-] [+] butonları (KillAura range)
-            if (selectedModule == 0) {
-                int px = cx + ROW_PADX + 8;
-                int py = cy + ROW_PADY + moduleNames.length * ROW_H + 6 + 54;
-                if (my >= py && my <= py + 12) {
-                    if (mx >= px && mx <= px + 14) {
-                        auraRange = Math.max(1.0f, auraRange - 0.1f);
-                        return true;
-                    }
-                    if (mx >= px + 19 && mx <= px + 33) {
-                        auraRange = Math.min(6.0f, auraRange + 0.1f);
-                        return true;
-                    }
-                    // ElytraTarget toggle
-                    if (mx >= px + 38 && mx <= px + 180) {
-                        elytraTarget = !elytraTarget;
-                        return true;
-                    }
-                }
-            }
+            // Ayar paneli etkileşimleri
+            if (selected >= 0) {
+                int px = cx + 12;
+                int py = cy + 52 + NAMES.length * 54 + 4;
+                int pw = W - 24;
 
-            // Hitbox ayarları
-            if (selectedModule == 2) {
-                int px = cx + ROW_PADX + 8;
-                int py = cy + ROW_PADY + moduleNames.length * ROW_H + 6 + 42;
-                if (my >= py && my <= py + 12) {
-                    if (mx >= px && mx <= px + 14) {
-                        hitboxSize = Math.max(0.1f, hitboxSize - 0.05f);
-                        return true;
-                    }
-                    if (mx >= px + 19 && mx <= px + 33) {
-                        hitboxSize = Math.min(2.0f, hitboxSize + 0.05f);
-                        return true;
-                    }
+                // KillAura range [-] [+]
+                if (selected == 0 && my >= py + 34 && my <= py + 48) {
+                    if (mx >= px + 10 && mx <= px + 22)
+                        auraRange = Math.max(1.5f, auraRange - 0.2f);
+                    else if (mx >= px + 110 && mx <= px + 122)
+                        auraRange = Math.min(6.0f, auraRange + 0.2f);
+                    else if (my >= py + 48 && my <= py + 60)
+                        elytraTarget = !elytraTarget;
+                    return true;
+                }
+                // Criticals mode toggle
+                if (selected == 2 && my >= py + 34 && my <= py + 48) {
+                    critMode = 1 - critMode;
+                    return true;
+                }
+                // HitBoxes size [-] [+]
+                if (selected == 3 && my >= py + 34 && my <= py + 48) {
+                    if (mx >= px + 10 && mx <= px + 22)
+                        hitboxSize = Math.max(0.05f, hitboxSize - 0.05f);
+                    else if (mx >= px + 110 && mx <= px + 122)
+                        hitboxSize = Math.min(1.5f, hitboxSize + 0.05f);
+                    return true;
                 }
             }
 
             return super.mouseClicked(mx, my, button);
         }
 
-        // ESC ile kapat
-        @Override
-        public boolean shouldPause() { return false; }
-    }
-}
+        // ── Yuvarlak Dikdörtgen (drawContext ile) ───
+        private void drawRoundRect(DrawContext ctx,
+                                   int x, int y, int w, int h,
+                                   int r, int color) {
+            // Merkez
+            ctx.fill(x + r, y,     x + w - r, y + h,     color);
+            ctx.fill(x,     y + r, x + r,     y + h - r, color);
+            ctx.fill(x + w - r, y + r, x + w, y + h - r, color);
+            // 4 köşe yayı (4x4 px blok yaklaşımı)
+            for (int dx = 0; dx < r; dx++) {
+                for (int dy = 0; dy < r; dy++) {
+                    double dist = Math.sqrt((r - dx - 0.5) * (r - dx - 0.5)
+             
