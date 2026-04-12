@@ -7,53 +7,40 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.hit.HitResult;
+import net.minecraft.util.math.MathHelper;
 import org.lwjgl.glfw.GLFW;
 
 public class HitX implements ClientModInitializer {
 
-    // ═══════════════════════════════════════════
-    //  MODÜL DURUMLARI
-    // ═══════════════════════════════════════════
+    // ── Modül Durumları ──────────────────────────────────────
     public static boolean auraActive      = false;
     public static boolean criticalsActive = false;
     public static boolean hitBoxActive    = false;
     public static boolean triggerActive   = false;
     public static boolean elytraTarget    = true;
 
-    // ═══════════════════════════════════════════
-    //  AYARLAR
-    // ═══════════════════════════════════════════
-    public static float auraRange   = 3.8f;   // KillAura menzil
-    public static float hitboxSize  = 0.4f;   // HitBox genişletme
-    public static int   critMode    = 0;       // 0 = packet, 1 = jump
+    // ── Ayarlar ──────────────────────────────────────────────
+    public static float auraRange  = 3.8f;
+    public static float hitboxSize = 0.4f;
+    public static int   critMode   = 0;   // 0 = packet, 1 = jump
 
-    // ═══════════════════════════════════════════
-    //  İÇ DEĞİŞKENLER
-    // ═══════════════════════════════════════════
-    private boolean      menuKeyLast  = false;
-    private LivingEntity auraTarget   = null;
-    private double       rotationYaw  = 0;     // hedef etrafında dönme açısı
-    private int          critTick     = 0;
-    private int          auraTick     = 0;
+    // ── İç Değişkenler ───────────────────────────────────────
+    private boolean      menuKeyLast = false;
+    private LivingEntity auraTarget  = null;
 
-    // ═══════════════════════════════════════════
-    //  INIT
-    // ═══════════════════════════════════════════
+    // ─────────────────────────────────────────────────────────
     @Override
     public void onInitializeClient() {
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.player == null || client.world == null) return;
 
-            // ── M tuşu → Menü ──────────────────────────────────────
+            // M tuşu → Menü
             boolean mKey = GLFW.glfwGetKey(
                     client.getWindow().getHandle(), GLFW.GLFW_KEY_M)
                     == GLFW.GLFW_PRESS;
@@ -62,18 +49,14 @@ public class HitX implements ClientModInitializer {
             }
             menuKeyLast = mKey;
 
-            auraTick++;
-
-            // ══════════════════════════════════════════════
-            //  KILLAURA — En yakın hedefi seç, etrafında
-            //  dönerek (yaw rotasyon) vur, elytra desteği
-            // ══════════════════════════════════════════════
+            // ── KILLAURA ─────────────────────────────────────
             if (auraActive) {
-                double range = (client.player.isFallFlying() && elytraTarget) ? 6.0 : auraRange;
+                double range = (client.player.isFallFlying() && elytraTarget)
+                        ? 6.0 : auraRange;
 
-                // Hedef seç: en yakın living entity
-                LivingEntity best = null;
-                double bestDist = Double.MAX_VALUE;
+                LivingEntity best    = null;
+                double       bestDist = Double.MAX_VALUE;
+
                 for (Entity e : client.world.getEntities()) {
                     if (!(e instanceof LivingEntity le)) continue;
                     if (le == client.player)              continue;
@@ -81,41 +64,33 @@ public class HitX implements ClientModInitializer {
                     double d = client.player.distanceTo(le);
                     if (d <= range && d < bestDist) {
                         bestDist = d;
-                        best = le;
+                        best     = le;
                     }
                 }
                 auraTarget = best;
 
                 if (best != null) {
-                    // ── Hedefe doğru smooth yaw rotasyonu ──
+                    // Hedefe smooth yaw/pitch
                     double dx = best.getX() - client.player.getX();
                     double dz = best.getZ() - client.player.getZ();
                     double dy = (best.getY() + best.getHeight() * 0.5)
-                              - (client.player.getY() + client.player.getEyeHeight(client.player.getPose()));
+                              - (client.player.getY() + client.player.getEyeHeight(
+                                    client.player.getPose()));
 
-                    double targetYaw   = Math.toDegrees(Math.atan2(-dx, dz));
-                    double targetPitch = Math.toDegrees(-Math.atan2(dy,
-                                          Math.sqrt(dx * dx + dz * dz)));
+                    float targetYaw   = (float) Math.toDegrees(Math.atan2(-dx, dz));
+                    float targetPitch = (float) Math.toDegrees(
+                            -Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)));
 
-                    // Smooth — her tick biraz yaklaş (anti-cheat dostu)
-                    float currentYaw   = client.player.getYaw();
-                    float currentPitch = client.player.getPitch();
+                    client.player.setYaw(lerpAngle(
+                            client.player.getYaw(), targetYaw, 0.4f));
+                    client.player.setPitch(MathHelper.clamp(
+                            lerpAngle(client.player.getPitch(), targetPitch, 0.4f),
+                            -90f, 90f));
 
-                    float newYaw   = lerpAngle(currentYaw,   (float) targetYaw,   0.4f);
-                    float newPitch = lerpAngle(currentPitch, (float) targetPitch, 0.4f);
-
-                    client.player.setYaw(newYaw);
-                    client.player.setPitch(MathHelper.clamp(newPitch, -90f, 90f));
-
-                    // Dönen yaw referansı (görsel için)
-                    rotationYaw += 8.0;
-
-                    // ── Saldırı (cooldown dolunca) ──
-                    float cd = client.player.getAttackCooldownProgress(0.5f);
-                    if (cd >= 1.0f) {
-                        // Criticals varsa önce packet jump
+                    // Saldırı
+                    if (client.player.getAttackCooldownProgress(0.5f) >= 1.0f) {
                         if (criticalsActive && client.player.isOnGround()) {
-                            sendCriticalPackets(client);
+                            sendCritPackets(client);
                         }
                         client.interactionManager.attackEntity(client.player, best);
                         client.player.swingHand(Hand.MAIN_HAND);
@@ -125,18 +100,15 @@ public class HitX implements ClientModInitializer {
                 auraTarget = null;
             }
 
-            // ══════════════════════════════════════════════
-            //  TRIGGERBOT — Nişan hedefindeyse otomatik vur
-            // ══════════════════════════════════════════════
+            // ── TRIGGERBOT ───────────────────────────────────
             if (triggerActive) {
                 HitResult hr = client.crosshairTarget;
                 if (hr instanceof EntityHitResult ehr) {
-                    Entity target = ehr.getEntity();
-                    if (target instanceof LivingEntity le && le.isAlive()) {
-                        float cd = client.player.getAttackCooldownProgress(0.5f);
-                        if (cd >= 1.0f) {
+                    Entity t = ehr.getEntity();
+                    if (t instanceof LivingEntity le && le.isAlive()) {
+                        if (client.player.getAttackCooldownProgress(0.5f) >= 1.0f) {
                             if (criticalsActive && client.player.isOnGround()) {
-                                sendCriticalPackets(client);
+                                sendCritPackets(client);
                             }
                             client.interactionManager.attackEntity(client.player, le);
                             client.player.swingHand(Hand.MAIN_HAND);
@@ -144,28 +116,15 @@ public class HitX implements ClientModInitializer {
                     }
                 }
             }
-
-            // ══════════════════════════════════════════════
-            //  HITBOXES — Tüm entity'lerin box'ını genişlet
-            //  (EntityDimensions mixin gerekir, burada flag)
-            // ══════════════════════════════════════════════
-            // hitBoxActive flag'i → HitboxMixin tarafından kullanılır
-            // (aşağıda mixin sınıfı örneği var)
         });
     }
 
-    // ═══════════════════════════════════════════
-    //  YARDIMCI: Kritik paket hilesi
-    //  Yerden küçük yükseklik paketi gönder →
-    //  sunucu "havada" zannetsin → kritik kayıt
-    // ═══════════════════════════════════════════
-    private void sendCriticalPackets(MinecraftClient client) {
+    // ── Kritik paket hilesi (NCP bypass) ─────────────────────
+    private void sendCritPackets(MinecraftClient client) {
         if (client.getNetworkHandler() == null) return;
         double x = client.player.getX();
         double y = client.player.getY();
         double z = client.player.getZ();
-
-        // 3 aşamalı micro-hop (NCP bypass)
         client.getNetworkHandler().sendPacket(
                 new PlayerMoveC2SPacket.PositionAndOnGround(x, y + 0.0625, z, false));
         client.getNetworkHandler().sendPacket(
@@ -176,39 +135,32 @@ public class HitX implements ClientModInitializer {
                 new PlayerMoveC2SPacket.PositionAndOnGround(x, y, z, true));
     }
 
-    // ═══════════════════════════════════════════
-    //  YARDIMCI: Açı lerp (sarma destekli)
-    // ═══════════════════════════════════════════
+    // ── Açı lerp (sarma destekli) ────────────────────────────
     private float lerpAngle(float from, float to, float t) {
         float delta = ((to - from) % 360 + 540) % 360 - 180;
         return from + delta * t;
     }
 
-    // ═══════════════════════════════════════════
-    //  MODERN GUI — Saf drawContext, PNG YOK
-    // ═══════════════════════════════════════════
+    // =========================================================
+    //  MODERN GUI — Tamamen saf çizim, PNG YOK
+    // =========================================================
     public class ModernGui extends Screen {
 
-        // Kart boyutu
         private static final int W = 260;
-        private static final int H = 310;
+        private static final int H = 300;
 
-        // Modüller: isim, aktif getter/setter referansı yoktur (switch kullanır)
-        private static final String[] NAMES = {
+        private static final String[] MODULE_NAMES = {
             "KillAura", "TriggerBot", "Criticals", "HitBoxes"
         };
 
-        // Seçili satır (ayar açma)
         private int selected = -1;
-
-        // Fare yeri (hover efekti için)
         private int hoverRow = -1;
 
         protected ModernGui() {
             super(Text.literal("HitX"));
         }
 
-        // ── Aktif mi? ───────────────────────────────
+        // ── Durum getter/setter ───────────────────────────────
         private boolean getState(int i) {
             return switch (i) {
                 case 0 -> auraActive;
@@ -219,7 +171,7 @@ public class HitX implements ClientModInitializer {
             };
         }
 
-        private void toggle(int i) {
+        private void toggleModule(int i) {
             switch (i) {
                 case 0 -> auraActive      = !auraActive;
                 case 1 -> triggerActive   = !triggerActive;
@@ -228,238 +180,201 @@ public class HitX implements ClientModInitializer {
             }
         }
 
-        // ── Ana Render ──────────────────────────────
+        // ── Render ───────────────────────────────────────────
         @Override
         public void render(DrawContext ctx, int mx, int my, float delta) {
             int cx = (width  - W) / 2;
             int cy = (height - H) / 2;
 
-            // Hover satırını hesapla
+            // Hover hesapla
             hoverRow = -1;
-            for (int i = 0; i < NAMES.length; i++) {
-                int ry = cy + 52 + i * 54;
-                if (mx >= cx + 12 && mx <= cx + W - 12
-                 && my >= ry      && my <= ry + 44) {
+            for (int i = 0; i < MODULE_NAMES.length; i++) {
+                int ry = cy + 50 + i * 50;
+                if (mx >= cx + 10 && mx <= cx + W - 10
+                 && my >= ry      && my <= ry + 40) {
                     hoverRow = i;
                 }
             }
 
-            // ── 1. Kart arka planı ─────────────────
-            // Dış gölge (birkaç katman koyu fill)
-            for (int s = 6; s > 0; s--) {
-                int alpha = 0x18 * (7 - s);
-                ctx.fill(cx - s, cy - s, cx + W + s, cy + H + s,
-                         (alpha << 24));
-            }
-            // Ana kart
-            drawRoundRect(ctx, cx, cy, W, H, 14, 0xFF0D0018);
+            // Kart arka planı
+            drawRoundRect(ctx, cx, cy, W, H, 12, 0xFF0D0018);
 
-            // Mor kenar çizgisi
-            drawRoundRectBorder(ctx, cx, cy, W, H, 14, 0xFFCC44FF, 2);
+            // Mor üst şerit
+            ctx.fill(cx + 12, cy,     cx + W - 12, cy + 2,  0xFFCC44FF);
+            ctx.fill(cx,      cy + 2, cx + W,      cy + 44, 0xFF160025);
+            ctx.fill(cx,      cy + 44, cx + W,     cy + 45, 0xFF330055);
 
-            // ── 2. Başlık alanı ────────────────────
-            // Başlık gradient şeridi
-            ctx.fill(cx + 14, cy, cx + W - 14, cy + 1, 0xFFCC44FF);
-            drawRoundRect(ctx, cx, cy, W, 44, 14, 0xFF160025);
-            ctx.fill(cx, cy + 30, cx + W, cy + 44, 0xFF0D0018); // düz köşe alt
+            // Başlık
+            ctx.drawCenteredTextWithShadow(textRenderer,
+                    "\u2694 HITX PREMIUM \u2694",
+                    cx + W / 2, cy + 14, 0xFFEE88FF);
+            ctx.drawCenteredTextWithShadow(textRenderer,
+                    "M = open/close",
+                    cx + W / 2, cy + 30, 0xFF555566);
 
-            // ⚔ simge (kılıç karakteri) + başlık
-            ctx.drawCenteredTextWithShadow(
-                    textRenderer,
-                    "§d✦ §fHITX §7PREMIUM §d✦",
-                    cx + W / 2,
-                    cy + 15,
-                    0xFFFFFFFF
-            );
-
-            // Versiyon
-            ctx.drawCenteredTextWithShadow(
-                    textRenderer, "§8v2.0  |  M to toggle",
-                    cx + W / 2, cy + 30, 0xFF444455);
-
-            // ── 3. Modül Satırları ─────────────────
-            for (int i = 0; i < NAMES.length; i++) {
+            // Modül satırları
+            for (int i = 0; i < MODULE_NAMES.length; i++) {
                 drawRow(ctx, cx, cy, i);
             }
 
-            // ── 4. Seçili modül ayar paneli ────────
+            // Ayar paneli
             if (selected >= 0) {
                 drawSettings(ctx, cx, cy);
             }
 
-            // ── 5. Alt bilgi ───────────────────────
-            ctx.drawCenteredTextWithShadow(
-                    textRenderer,
-                    "§8Left: toggle  |  Right: settings",
-                    cx + W / 2, cy + H - 14, 0xFF333344
-            );
+            // Alt bilgi
+            ctx.drawCenteredTextWithShadow(textRenderer,
+                    "Left: toggle  |  Right: settings",
+                    cx + W / 2, cy + H - 12, 0xFF333344);
 
             super.render(ctx, mx, my, delta);
         }
 
-        // ── Modül Satırı ────────────────────────────
+        // ── Modül Satırı ─────────────────────────────────────
         private void drawRow(DrawContext ctx, int cx, int cy, int idx) {
-            boolean active  = getState(idx);
-            boolean hover   = (hoverRow == idx);
-            boolean sel     = (selected == idx);
+            boolean active = getState(idx);
+            boolean hover  = (hoverRow == idx);
+            boolean sel    = (selected == idx);
 
-            int rx = cx + 12;
-            int ry = cy + 52 + idx * 54;
-            int rw = W - 24;
-            int rh = 44;
+            int rx = cx + 10;
+            int ry = cy + 50 + idx * 50;
+            int rw = W - 20;
+            int rh = 40;
 
-            // Arka plan
-            int bg = sel   ? 0xCC1A0035 :
-                     hover ? 0xAA130028 :
-                             0x99090015;
-            drawRoundRect(ctx, rx, ry, rw, rh, 8, bg);
+            int bg = sel   ? 0xCC1A0035
+                   : hover ? 0xAA130028
+                           : 0x99090015;
+
+            drawRoundRect(ctx, rx, ry, rw, rh, 7, bg);
 
             // Sol aktif çizgisi
             if (active) {
-                ctx.fill(rx, ry + 6, rx + 3, ry + rh - 6, 0xFFCC44FF);
-                // Parlama efekti
-                ctx.fill(rx, ry + 6, rx + 1, ry + rh - 6, 0x88FF88FF);
+                ctx.fill(rx, ry + 5, rx + 3, ry + rh - 5, 0xFFCC44FF);
             }
 
-            // Modül adı
+            // İsim
             int nameColor = active ? 0xFFFFFFFF : 0xFF888899;
-            ctx.drawTextWithShadow(
-                    textRenderer, NAMES[idx],
-                    rx + 16, ry + rh / 2 - 4, nameColor
-            );
+            ctx.drawTextWithShadow(textRenderer,
+                    MODULE_NAMES[idx],
+                    rx + 14, ry + rh / 2 - 4, nameColor);
 
-            // Durum etiketi
+            // ON etiketi
             if (active) {
-                int lx = rx + rw - 80;
+                int lx = rx + rw - 76;
                 int ly = ry + rh / 2 - 6;
-                ctx.fill(lx, ly, lx + 30, ly + 13, 0xAA220044);
-                ctx.fill(lx, ly, lx + 30, ly + 1,  0xFFCC44FF);
-                ctx.drawCenteredTextWithShadow(
-                        textRenderer, "§dON", lx + 15, ly + 3, 0xFFCC44FF);
+                ctx.fill(lx, ly, lx + 28, ly + 12, 0xAA220044);
+                ctx.drawCenteredTextWithShadow(textRenderer,
+                        "ON", lx + 14, ly + 2, 0xFFCC44FF);
             }
 
-            // Toggle switch (sağ taraf)
-            drawSwitch(ctx, rx + rw - 42, ry + rh / 2 - 7, active);
+            // Toggle switch
+            drawSwitch(ctx, rx + rw - 38, ry + rh / 2 - 7, active);
         }
 
-        // ── Toggle Switch ────────────────────────────
+        // ── Toggle Switch ────────────────────────────────────
         private void drawSwitch(DrawContext ctx, int x, int y, boolean on) {
-            // Track
-            int trackBg = on ? 0xAA660099 : 0xAA222233;
-            ctx.fill(x,      y + 3,  x + 30, y + 11, trackBg);
-            ctx.fill(x + 1,  y + 2,  x + 29, y + 12, trackBg);
-
-            // Knob
-            int kx = on ? x + 17 : x + 2;
-            int knobColor = on ? 0xFFDD66FF : 0xFF555566;
-            ctx.fill(kx,     y,     kx + 11, y + 14, knobColor);
-            ctx.fill(kx + 1, y + 1, kx + 10, y + 13,
-                     on ? 0xFFFFAAFF : 0xFF777788);
+            int track = on ? 0xAA660099 : 0xAA222233;
+            ctx.fill(x, y + 3, x + 28, y + 11, track);
+            int kx    = on ? x + 16 : x + 2;
+            int knob  = on ? 0xFFDD66FF : 0xFF555566;
+            ctx.fill(kx, y, kx + 10, y + 14, knob);
+            ctx.fill(kx + 1, y + 1, kx + 9, y + 13, on ? 0xFFFFAAFF : 0xFF777788);
         }
 
-        // ── Ayar Paneli ─────────────────────────────
+        // ── Ayar Paneli ──────────────────────────────────────
         private void drawSettings(DrawContext ctx, int cx, int cy) {
-            int px = cx + 12;
-            int py = cy + 52 + NAMES.length * 54 + 4;
-            int pw = W - 24;
-            int ph = 68;
+            int px = cx + 10;
+            int py = cy + 50 + MODULE_NAMES.length * 50 + 4;
+            int pw = W - 20;
+            int ph = 70;
 
-            drawRoundRect(ctx, px, py, pw, ph, 8, 0xCC0A0020);
+            drawRoundRect(ctx, px, py, pw, ph, 7, 0xCC0A0020);
             ctx.fill(px, py, px + pw, py + 2, 0xFFCC44FF);
 
-            ctx.drawTextWithShadow(
-                    textRenderer,
-                    "§d⚙ §f" + NAMES[selected] + " §7Settings",
-                    px + 10, py + 8, 0xFFDDDDFF
-            );
+            ctx.drawTextWithShadow(textRenderer,
+                    "\u26a9 " + MODULE_NAMES[selected] + " Settings",
+                    px + 10, py + 8, 0xFFDD88FF);
 
             switch (selected) {
-                case 0 -> { // KillAura
+                case 0 -> {
                     ctx.drawText(textRenderer,
-                            "§7Range: §d" + String.format("%.1f", auraRange) + " §8blocks",
+                            "Range: " + String.format("%.1f", auraRange) + " blocks",
                             px + 10, py + 24, 0xFFCCCCCC, false);
                     ctx.drawText(textRenderer,
-                            "§8[§f-§8] §7decrease   §8[§f+§8] §7increase",
+                            "[-]  [+]    ElytraTarget: " + (elytraTarget ? "ON" : "OFF"),
                             px + 10, py + 38, 0xFF888899, false);
-                    ctx.drawText(textRenderer,
-                            "§7ElytraTarget: " + (elytraTarget ? "§dON" : "§8OFF"),
-                            px + 10, py + 52, 0xFFAAAAAA, false);
                 }
-                case 2 -> { // Criticals
+                case 2 -> {
                     ctx.drawText(textRenderer,
-                            "§7Mode: §d" + (critMode == 0 ? "Packet (NCP)" : "Jump"),
+                            "Mode: " + (critMode == 0 ? "Packet" : "Jump"),
                             px + 10, py + 24, 0xFFCCCCCC, false);
                     ctx.drawText(textRenderer,
-                            "§8[§fClick§8] §7to switch mode",
+                            "[Click] to switch mode",
                             px + 10, py + 38, 0xFF888899, false);
-                    ctx.drawText(textRenderer,
-                            "§8Packet mode = more compatible",
-                            px + 10, py + 52, 0xFF555566, false);
                 }
-                case 3 -> { // HitBoxes
+                case 3 -> {
                     ctx.drawText(textRenderer,
-                            "§7Size: §d+" + String.format("%.2f", hitboxSize),
+                            "Extra size: +" + String.format("%.2f", hitboxSize),
                             px + 10, py + 24, 0xFFCCCCCC, false);
                     ctx.drawText(textRenderer,
-                            "§8[§f-§8] §7smaller   §8[§f+§8] §7larger",
+                            "[-]  [+]  to adjust",
                             px + 10, py + 38, 0xFF888899, false);
-                    ctx.drawText(textRenderer,
-                            "§8Requires HitboxMixin enabled",
-                            px + 10, py + 52, 0xFF555566, false);
                 }
                 default -> ctx.drawText(textRenderer,
-                        "§8No settings available.",
+                        "No settings.",
                         px + 10, py + 30, 0xFF444455, false);
             }
         }
 
-        // ── Mouse Click ─────────────────────────────
+        // ── Mouse Click ──────────────────────────────────────
         @Override
         public boolean mouseClicked(double mx, double my, int button) {
             int cx = (width  - W) / 2;
             int cy = (height - H) / 2;
 
-            for (int i = 0; i < NAMES.length; i++) {
-                int rx = cx + 12;
-                int ry = cy + 52 + i * 54;
-                int rw = W - 24;
-                int rh = 44;
-
+            // Satır tıklamaları
+            for (int i = 0; i < MODULE_NAMES.length; i++) {
+                int rx = cx + 10;
+                int ry = cy + 50 + i * 50;
+                int rw = W - 20;
+                int rh = 40;
                 if (mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh) {
-                    if (button == 0) toggle(i);              // Sol tık: toggle
-                    else if (button == 1)                    // Sağ tık: ayarlar
+                    if (button == 0) {
+                        toggleModule(i);
+                    } else if (button == 1) {
                         selected = (selected == i) ? -1 : i;
+                    }
                     return true;
                 }
             }
 
-            // Ayar paneli etkileşimleri
+            // Ayar paneli tıklamaları
             if (selected >= 0) {
-                int px = cx + 12;
-                int py = cy + 52 + NAMES.length * 54 + 4;
-                int pw = W - 24;
+                int px = cx + 10;
+                int py = cy + 50 + MODULE_NAMES.length * 50 + 4;
 
-                // KillAura range [-] [+]
-                if (selected == 0 && my >= py + 34 && my <= py + 48) {
-                    if (mx >= px + 10 && mx <= px + 22)
+                if (selected == 0 && my >= py + 34 && my <= py + 50) {
+                    if (mx >= px + 10 && mx <= px + 22) {
                         auraRange = Math.max(1.5f, auraRange - 0.2f);
-                    else if (mx >= px + 110 && mx <= px + 122)
+                    } else if (mx >= px + 30 && mx <= px + 42) {
                         auraRange = Math.min(6.0f, auraRange + 0.2f);
-                    else if (my >= py + 48 && my <= py + 60)
+                    } else if (mx >= px + 60) {
                         elytraTarget = !elytraTarget;
+                    }
                     return true;
                 }
-                // Criticals mode toggle
-                if (selected == 2 && my >= py + 34 && my <= py + 48) {
+
+                if (selected == 2 && my >= py + 34 && my <= py + 50) {
                     critMode = 1 - critMode;
                     return true;
                 }
-                // HitBoxes size [-] [+]
-                if (selected == 3 && my >= py + 34 && my <= py + 48) {
-                    if (mx >= px + 10 && mx <= px + 22)
+
+                if (selected == 3 && my >= py + 34 && my <= py + 50) {
+                    if (mx >= px + 10 && mx <= px + 22) {
                         hitboxSize = Math.max(0.05f, hitboxSize - 0.05f);
-                    else if (mx >= px + 110 && mx <= px + 122)
+                    } else if (mx >= px + 30 && mx <= px + 42) {
                         hitboxSize = Math.min(1.5f, hitboxSize + 0.05f);
+                    }
                     return true;
                 }
             }
@@ -467,16 +382,36 @@ public class HitX implements ClientModInitializer {
             return super.mouseClicked(mx, my, button);
         }
 
-        // ── Yuvarlak Dikdörtgen (drawContext ile) ───
+        // ── Yuvarlak Dikdörtgen ──────────────────────────────
         private void drawRoundRect(DrawContext ctx,
                                    int x, int y, int w, int h,
                                    int r, int color) {
-            // Merkez
             ctx.fill(x + r, y,     x + w - r, y + h,     color);
             ctx.fill(x,     y + r, x + r,     y + h - r, color);
             ctx.fill(x + w - r, y + r, x + w, y + h - r, color);
-            // 4 köşe yayı (4x4 px blok yaklaşımı)
+
             for (int dx = 0; dx < r; dx++) {
                 for (int dy = 0; dy < r; dy++) {
-                    double dist = Math.sqrt((r - dx - 0.5) * (r - dx - 0.5)
-             
+                    double dist = Math.sqrt(
+                            (double)(r - dx) * (r - dx)
+                          + (double)(r - dy) * (r - dy));
+                    if (dist <= r) {
+                        ctx.fill(x + dx,             y + dy,
+                                 x + dx + 1,         y + dy + 1,         color);
+                        ctx.fill(x + w - r + dx,     y + dy,
+                                 x + w - r + dx + 1, y + dy + 1,         color);
+                        ctx.fill(x + dx,             y + h - r + dy,
+                                 x + dx + 1,         y + h - r + dy + 1, color);
+                        ctx.fill(x + w - r + dx,     y + h - r + dy,
+                                 x + w - r + dx + 1, y + h - r + dy + 1, color);
+                    }
+                }
+            }
+        }
+
+        @Override public boolean shouldPause()      { return false; }
+        @Override public boolean shouldCloseOnEsc() { return true;  }
+
+    } // end ModernGui
+
+} // end HitX
