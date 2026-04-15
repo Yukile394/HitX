@@ -1,8 +1,9 @@
 package exloran.hitx.mixin;
 
 import com.mojang.blaze3d.systems.RenderSystem;
-import exloran.hitx.HitX;
+import exloran.hitx.HitXConfig;
 import exloran.hitx.listener.OverlayReloadListener;
+import me.shedaniel.autoconfig.AutoConfig;
 import net.minecraft.client.render.OverlayTexture;
 import net.minecraft.client.texture.NativeImage;
 import net.minecraft.client.texture.NativeImageBackedTexture;
@@ -39,13 +40,16 @@ public abstract class MixinOverlayTexture implements OverlayReloadListener {
         NativeImage nativeImage = this.texture.getImage();
         if (nativeImage == null) return;
 
+        // Config'i çağırıyoruz
+        HitXConfig cfg = AutoConfig.getConfigHolder(HitXConfig.class).getConfig();
+
         for (int i = 0; i < 16; ++i) {
             for (int j = 0; j < 16; ++j) {
                 if (i < 8) {
-                    if (HitX.hitColorActive) {
-                        nativeImage.setColor(j, i, getColorInt(HitX.hcRed, HitX.hcGreen, HitX.hcBlue, HitX.hcAlpha));
+                    if (cfg.hitColorActive) {
+                        nativeImage.setColor(j, i, getColorInt(cfg.hcRed, cfg.hcGreen, cfg.hcBlue, cfg.hcAlpha));
                     } else {
-                        // Varsayılan Minecraft kırmızı efekti
+                        // Varsayılan Minecraft Kırmızı Efekti
                         nativeImage.setColor(j, i, -1308622593);
                     }
                 }
