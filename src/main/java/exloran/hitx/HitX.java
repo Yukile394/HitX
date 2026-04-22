@@ -395,7 +395,7 @@ public class HitX implements ClientModInitializer {
         private boolean hov(int mx,int my,int x,int y,int w,int h){ return mx>=x&&mx<=x+w&&my>=y&&my<=y+h; }
         private boolean hovD(double mx,double my,int x,int y,int w,int h){ return mx>=x&&mx<=x+w&&my>=y&&my<=y+h; }
 
-        private int ox(){ return width/2-PW/2        private int ox(){ return width/2-PW/2; }
+                private int ox(){ return width/2-PW/2; }
         private int oy(){ return height/2-PH/2; }
         private int cx(){ return ox()+120; }
         private int cy(){ return oy()+32; }
@@ -410,7 +410,7 @@ public class HitX implements ClientModInitializer {
             // Sekme seçimi
             int ty = oy + 32;
             for (String t : TABS) {
-                if (hovD(mx, my, ox + 5, ty, 104, 22)) {
+                if (hovD(mx, my, (double)ox + 5, (double)ty, 104, 22)) {
                     tab = t;
                     bind = -1;
                     dragSlot = -1;
@@ -421,28 +421,28 @@ public class HitX implements ClientModInitializer {
 
             switch (tab) {
                 case "Hitboxes" -> {
-                    if (hovD(mx, my, cx, cy, cw, 22)) { hitBoxActive = !hitBoxActive; return true; }
+                    if (hovD(mx, my, (double)cx, (double)cy, cw, 22)) { hitBoxActive = !hitBoxActive; return true; }
                     if (cs(mx, my, cx, cy + 42, cw, 0)) { cfg.xzExpand = 0.5f + sv(mx, cx, cw) * 4.5f; sc(); return true; }
                     if (cs(mx, my, cx, cy + 72, cw, 1)) { cfg.yExpand = 0.5f + sv(mx, cx, cw) * 3.5f; sc(); return true; }
                     if (cs(mx, my, cx, cy + 102, cw, 2)) { cfg.yOffset = -1f + sv(mx, cx, cw) * 2f; sc(); return true; }
                 }
                 case "AimAssist" -> {
-                    if (hovD(mx, my, cx, cy, cw, 22)) { 
+                    if (hovD(mx, my, (double)cx, (double)cy, cw, 22)) { 
                         aimAssistActive = !aimAssistActive; 
                         locked = null;
                         bar(client, aimAssistActive ? "§aAimAssist §7Açık" : "§cAimAssist §7Kapalı"); 
                         return true; 
                     }
-                    if (hovD(mx, my, cx, cy + 26, cw, 22)) { aimAutoAttack = !aimAutoAttack; return true; }
-                    if (hovD(mx, my, cx, cy + 52, cw, 22)) { aimRecoil = !aimRecoil; return true; }
-                    if (hovD(mx, my, cx, cy + 78, cw, 22)) { aimElytra = !aimElytra; return true; }
+                    if (hovD(mx, my, (double)cx, (double)cy + 26, cw, 22)) { aimAutoAttack = !aimAutoAttack; return true; }
+                    if (hovD(mx, my, (double)cx, (double)cy + 52, cw, 22)) { aimRecoil = !aimRecoil; return true; }
+                    if (hovD(mx, my, (double)cx, (double)cy + 78, cw, 22)) { aimElytra = !aimElytra; return true; }
                     if (cs(mx, my, cx, cy + 120, cw, 10)) { aimRange = 1f + sv(mx, cx, cw) * 9f; return true; }
                     if (cs(mx, my, cx, cy + 150, cw, 11)) { aimSpeed = 0.01f + sv(mx, cx, cw) * 0.49f; return true; }
                     if (cs(mx, my, cx, cy + 180, cw, 12)) { aimFov = sv(mx, cx, cw) * 180f; return true; }
                     if (cs(mx, my, cx, cy + 210, cw, 13)) { aimRecoilStr = sv(mx, cx, cw) * 2f; return true; }
                 }
                 case "TriggerBot" -> {
-                    if (hovD(mx, my, cx, cy, cw, 22)) { 
+                    if (hovD(mx, my, (double)cx, (double)cy, cw, 22)) { 
                         triggerBotActive = !triggerBotActive;
                         bar(client, triggerBotActive ? "§aTriggerBot §7Açık" : "§cTriggerBot §7Kapalı"); 
                         return true; 
@@ -450,7 +450,7 @@ public class HitX implements ClientModInitializer {
                     if (cs(mx, my, cx, cy + 42, cw, 20)) { triggerDelay = (int)(sv(mx, cx, cw) * 500); return true; }
                 }
                 case "NightVision" -> {
-                    if (hovD(mx, my, cx, cy, cw, 22)) {
+                    if (hovD(mx, my, (double)cx, (double)cy, cw, 22)) {
                         nightVisionActive = !nightVisionActive;
                         if (!nightVisionActive) client.player.removeStatusEffect(StatusEffects.NIGHT_VISION);
                         bar(client, nightVisionActive ? "§aGece Görüşü §7Açık" : "§cGece Görüşü §7Kapalı");
@@ -458,23 +458,22 @@ public class HitX implements ClientModInitializer {
                     }
                 }
                 case "HitColor" -> {
-                    if (hovD(mx, my, cx, cy, cw, 22)) { cfg.hitColorActive = !cfg.hitColorActive; sc(); OverlayReloadListener.callEvent(); return true; }
+                    if (hovD(mx, my, (double)cx, (double)cy, cw, 22)) { cfg.hitColorActive = !cfg.hitColorActive; sc(); OverlayReloadListener.callEvent(); return true; }
                     if (cs(mx, my, cx, cy + 42, cw, 30)) { cfg.hcRed = (int)(sv(mx, cx, cw) * 255); sc(); OverlayReloadListener.callEvent(); return true; }
                     if (cs(mx, my, cx, cy + 70, cw, 31)) { cfg.hcGreen = (int)(sv(mx, cx, cw) * 255); sc(); OverlayReloadListener.callEvent(); return true; }
                     if (cs(mx, my, cx, cy + 98, cw, 32)) { cfg.hcBlue = (int)(sv(mx, cx, cw) * 255); sc(); OverlayReloadListener.callEvent(); return true; }
                     if (cs(mx, my, cx, cy + 126, cw, 33)) { cfg.hcAlpha = (int)(sv(mx, cx, cw) * 255); sc(); OverlayReloadListener.callEvent(); return true; }
                 }
                 case "Keybinds" -> {
-                    if (hovD(mx, my, cx, cy + 16, cw, 22)) { bind = 0; return true; }
-                    if (hovD(mx, my, cx, cy + 42, cw, 22)) { bind = 1; return true; }
-                    if (hovD(mx, my, cx, cy + 68, cw, 22)) { bind = 2; return true; }
-                    if (hovD(mx, my, cx, cy + 94, cw, 22)) { bind = 3; return true; }
+                    if (hovD(mx, my, (double)cx, (double)cy + 16, cw, 22)) { bind = 0; return true; }
+                    if (hovD(mx, my, (double)cx, (double)cy + 42, cw, 22)) { bind = 1; return true; }
+                    if (hovD(mx, my, (double)cx, (double)cy + 68, cw, 22)) { bind = 2; return true; }
+                    if (hovD(mx, my, (double)cx, (double)cy + 94, cw, 22)) { bind = 3; return true; }
                 }
             }
             return super.mouseClicked(mx, my, btn);
         }
 
-        // ── Sürükleme (Slider) Desteği ────────────────────────
         @Override
         public boolean mouseDragged(double mx, double my, int btn, double dx, double dy) {
             if (dragSlot == -1) return super.mouseDragged(mx, my, btn, dx, dy);
@@ -514,9 +513,8 @@ public class HitX implements ClientModInitializer {
 
         @Override public boolean shouldPause() { return false; }
 
-        // ── Yardımcı Fonksiyonlar ────────────────────────────
         private boolean cs(double mx, double my, int cx, int sy, int cw, int sid) {
-            if (hovD(mx, my, cx, sy - 3, cw, 16)) { 
+            if (hovD(mx, my, (double)cx, (double)sy - 3, cw, 16)) { 
                 dragSlot = sid; dCX = cx; dCW = cw; return true; 
             } 
             return false;
@@ -530,6 +528,5 @@ public class HitX implements ClientModInitializer {
 
     private void iconBtn(Screen s, ItemStack i, String t, int x, int y, int w, int h, ButtonWidget.PressAction p) {}
     private boolean isArmor(ItemStack s) { return s.getItem() instanceof net.minecraft.item.ArmorItem; }
-                }
-                         
-            
+        }
+                    
