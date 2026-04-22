@@ -166,7 +166,7 @@ public class HitX implements ClientModInitializer {
             }
         }
 
-        // AimAssist — sadece kamera döndür
+        // AimAssist — sadece kamera döndür (Yeni Flawless Lock)
         if (aimAssistActive && locked != null) smoothAim(client, locked);
 
         // TriggerBot — nişandaki hedefe vur (kilitli hedef gerekmez)
@@ -201,18 +201,34 @@ public class HitX implements ClientModInitializer {
         return (float) Math.toDegrees(Math.acos(MathHelper.clamp(look.dotProduct(toT), -1.0, 1.0)));
     }
 
-    private void smoothAim(MinecraftClient c, LivingEntity t) {
-        Vec3d eye = c.player.getEyePos(), tgt = t.getEyePos();
-        double dx = tgt.x-eye.x, dy = tgt.y-eye.y, dz = tgt.z-eye.z;
-        double hd = Math.sqrt(dx*dx+dz*dz);
-        float wY = (float) Math.toDegrees(Math.atan2(-dx, dz));
-        float wP = (float) Math.toDegrees(-Math.atan2(dy, hd));
-        c.player.setYaw(lerpA(c.player.getYaw(), wY, aimSpeed));
-        c.player.setPitch(MathHelper.clamp(lerpF(c.player.getPitch(), wP, aimSpeed), -90f, 90f));
+    // YENİ FLAWLESS KİLİTLENME VE ANTİ-STUTTER SİSTEMİ
+    private void smoothAim(MinecraftClient client, LivingEntity target) {
+        // 1. Prediction (Hareket Tahmini): Hedef hareket ediyorsa önüne kilitlen
+        double predictX = target.getX() + (target.getX() - target.prevX);
+        double predictZ = target.getZ() + (target.getZ() - target.prevZ);
+        
+        // 2. Yükseklik: Ayaklara değil, tam boyun/göğüs hizasına kilitlen
+        double targetY = target.getY() + (target.getEyeHeight(target.getPose()) * 0.75);
+
+        // 3. Hedefe Giden Açıyı Hesapla (Pitch ve Yaw)
+        float deltaYaw = MathHelper.wrapDegrees((float) Math.toDegrees(Math.atan2(predictZ - client.player.getZ(), predictX - client.player.getX())) - 90.0f - client.player.getYaw());
+        float deltaPitch = ((float) -Math.toDegrees(Math.atan2(targetY - (client.player.getY() + client.player.getEyeHeight(client.player.getPose())), Math.sqrt(Math.pow(predictX - client.player.getX(), 2) + Math.pow(predictZ - client.player.getZ(), 2))))) - client.player.getPitch();
+
+        // 4. GUI'deki "Smooth Hız" (aimSpeed) ile dönüş gücünü ayarla
+        float newYaw = client.player.getYaw() + (deltaYaw * aimSpeed);
+        float newPitch = MathHelper.clamp(client.player.getPitch() + (deltaPitch * aimSpeed), -90f, 90f);
+
+        // 5. Anti-Stutter / GCD Fix (Mouse Sensitivity bazlı ekran titremesini engelleme)
+        double gcdFix = (Math.pow(client.options.getMouseSensitivity().getValue() * 0.6 + 0.2, 3.0)) * 8.0 * 0.15;
+        
+        float finalYaw = (float) (newYaw - (newYaw - client.player.getYaw()) % gcdFix);
+        float finalPitch = (float) (newPitch - (newPitch - client.player.getPitch()) % gcdFix);
+
+        // 6. Sonucu uygula
+        client.player.setYaw(finalYaw);
+        client.player.setPitch(finalPitch);
     }
 
-    private float lerpF(float a, float b, float t) { return a + (b-a)*t; }
-    private float lerpA(float c, float t, float s)  { return c + (((t-c+540f)%360f)-180f)*s; }
     private void bar(MinecraftClient c, String m) {
         if (c.player != null) c.player.sendMessage(Text.literal("§8[§dHitX§8] §r"+m), true);
     }
@@ -379,121 +395,141 @@ public class HitX implements ClientModInitializer {
         private boolean hov(int mx,int my,int x,int y,int w,int h){ return mx>=x&&mx<=x+w&&my>=y&&my<=y+h; }
         private boolean hovD(double mx,double my,int x,int y,int w,int h){ return mx>=x&&mx<=x+w&&my>=y&&my<=y+h; }
 
-        private int ox(){ return width/2-PW/2; }
+        private int ox(){ return width/2-PW/2        private int ox(){ return width/2-PW/2; }
         private int oy(){ return height/2-PH/2; }
         private int cx(){ return ox()+120; }
         private int cy(){ return oy()+32; }
         private int cw(){ return PW-126; }
 
-        // ── Mouse Tıklama ────────────────────────────────────
+        // ── Mouse Tıklama Mantığı ────────────────────────────
         @Override
         public boolean mouseClicked(double mx, double my, int btn) {
             HitXConfig cfg = AutoConfig.getConfigHolder(HitXConfig.class).getConfig();
-            int ox=ox(),oy=oy(),cx=cx(),cy=cy(),cw=cw();
+            int ox=ox(), oy=oy(), cx=cx(), cy=cy(), cw=cw();
 
             // Sekme seçimi
-            int ty=oy+32;
-            for(String t:TABS){
-                if(hovD(mx,my,ox+5,ty,104,22)){ tab=t; bind=-1; dragSlot=-1; return true; }
-                ty+=26;
+            int ty = oy + 32;
+            for (String t : TABS) {
+                if (hovD(mx, my, ox + 5, ty, 104, 22)) {
+                    tab = t;
+                    bind = -1;
+                    dragSlot = -1;
+                    return true;
+                }
+                ty += 26;
             }
 
-            switch(tab){
+            switch (tab) {
                 case "Hitboxes" -> {
-                    if(hovD(mx,my,cx,cy,cw,22))         { hitBoxActive=!hitBoxActive; return true; }
-                    if(cs(mx,my,cx,cy+42, cw,0))        { cfg.xzExpand=0.5f+sv(mx,cx,cw)*4.5f; sc(); return true; }
-                    if(cs(mx,my,cx,cy+72, cw,1))        { cfg.yExpand =0.5f+sv(mx,cx,cw)*3.5f; sc(); return true; }
-                    if(cs(mx,my,cx,cy+102,cw,2))        { cfg.yOffset =-1f +sv(mx,cx,cw)*2f;   sc(); return true; }
+                    if (hovD(mx, my, cx, cy, cw, 22)) { hitBoxActive = !hitBoxActive; return true; }
+                    if (cs(mx, my, cx, cy + 42, cw, 0)) { cfg.xzExpand = 0.5f + sv(mx, cx, cw) * 4.5f; sc(); return true; }
+                    if (cs(mx, my, cx, cy + 72, cw, 1)) { cfg.yExpand = 0.5f + sv(mx, cx, cw) * 3.5f; sc(); return true; }
+                    if (cs(mx, my, cx, cy + 102, cw, 2)) { cfg.yOffset = -1f + sv(mx, cx, cw) * 2f; sc(); return true; }
                 }
                 case "AimAssist" -> {
-                    if(hovD(mx,my,cx,cy,     cw,22)){ aimAssistActive=!aimAssistActive; locked=null;
-                        bar(client,aimAssistActive?"§aAimAssist §7Açık":"§cAimAssist §7Kapalı"); return true; }
-                    if(hovD(mx,my,cx,cy+26,  cw,22)){ aimAutoAttack=!aimAutoAttack; return true; }
-                    if(hovD(mx,my,cx,cy+52,  cw,22)){ aimRecoil=!aimRecoil; return true; }
-                    if(hovD(mx,my,cx,cy+78,  cw,22)){ aimElytra=!aimElytra; return true; }
-                    if(cs(mx,my,cx,cy+120,cw,10)){ aimRange    =1f   +sv(mx,cx,cw)*9f;    return true; }
-                    if(cs(mx,my,cx,cy+150,cw,11)){ aimSpeed    =0.01f+sv(mx,cx,cw)*0.49f; return true; }
-                    if(cs(mx,my,cx,cy+180,cw,12)){ aimFov      =sv(mx,cx,cw)*180f;        return true; }
-                    if(cs(mx,my,cx,cy+210,cw,13)){ aimRecoilStr=sv(mx,cx,cw)*2f;          return true; }
+                    if (hovD(mx, my, cx, cy, cw, 22)) { 
+                        aimAssistActive = !aimAssistActive; 
+                        locked = null;
+                        bar(client, aimAssistActive ? "§aAimAssist §7Açık" : "§cAimAssist §7Kapalı"); 
+                        return true; 
+                    }
+                    if (hovD(mx, my, cx, cy + 26, cw, 22)) { aimAutoAttack = !aimAutoAttack; return true; }
+                    if (hovD(mx, my, cx, cy + 52, cw, 22)) { aimRecoil = !aimRecoil; return true; }
+                    if (hovD(mx, my, cx, cy + 78, cw, 22)) { aimElytra = !aimElytra; return true; }
+                    if (cs(mx, my, cx, cy + 120, cw, 10)) { aimRange = 1f + sv(mx, cx, cw) * 9f; return true; }
+                    if (cs(mx, my, cx, cy + 150, cw, 11)) { aimSpeed = 0.01f + sv(mx, cx, cw) * 0.49f; return true; }
+                    if (cs(mx, my, cx, cy + 180, cw, 12)) { aimFov = sv(mx, cx, cw) * 180f; return true; }
+                    if (cs(mx, my, cx, cy + 210, cw, 13)) { aimRecoilStr = sv(mx, cx, cw) * 2f; return true; }
                 }
                 case "TriggerBot" -> {
-                    if(hovD(mx,my,cx,cy,cw,22)){ triggerBotActive=!triggerBotActive;
-                        bar(client,triggerBotActive?"§aTriggerBot §7Açık":"§cTriggerBot §7Kapalı"); return true; }
-                    if(cs(mx,my,cx,cy+42,cw,20)){ triggerDelay=(int)(sv(mx,cx,cw)*500); return true; }
+                    if (hovD(mx, my, cx, cy, cw, 22)) { 
+                        triggerBotActive = !triggerBotActive;
+                        bar(client, triggerBotActive ? "§aTriggerBot §7Açık" : "§cTriggerBot §7Kapalı"); 
+                        return true; 
+                    }
+                    if (cs(mx, my, cx, cy + 42, cw, 20)) { triggerDelay = (int)(sv(mx, cx, cw) * 500); return true; }
                 }
                 case "NightVision" -> {
-                    if(hovD(mx,my,cx,cy,cw,22)){
-                        nightVisionActive=!nightVisionActive;
-                        if(!nightVisionActive) client.player.removeStatusEffect(StatusEffects.NIGHT_VISION);
-                        bar(client,nightVisionActive?"§aGece Görüşü §7Açık":"§cGece Görüşü §7Kapalı");
+                    if (hovD(mx, my, cx, cy, cw, 22)) {
+                        nightVisionActive = !nightVisionActive;
+                        if (!nightVisionActive) client.player.removeStatusEffect(StatusEffects.NIGHT_VISION);
+                        bar(client, nightVisionActive ? "§aGece Görüşü §7Açık" : "§cGece Görüşü §7Kapalı");
                         return true;
                     }
                 }
                 case "HitColor" -> {
-                    if(hovD(mx,my,cx,cy,cw,22)){ cfg.hitColorActive=!cfg.hitColorActive; sc(); OverlayReloadListener.callEvent(); return true; }
-                    if(cs(mx,my,cx,cy+42, cw,30)){ cfg.hcRed  =(int)(sv(mx,cx,cw)*255); sc(); OverlayReloadListener.callEvent(); return true; }
-                    if(cs(mx,my,cx,cy+70, cw,31)){ cfg.hcGreen=(int)(sv(mx,cx,cw)*255); sc(); OverlayReloadListener.callEvent(); return true; }
-                    if(cs(mx,my,cx,cy+98, cw,32)){ cfg.hcBlue =(int)(sv(mx,cx,cw)*255); sc(); OverlayReloadListener.callEvent(); return true; }
-                    if(cs(mx,my,cx,cy+126,cw,33)){ cfg.hcAlpha=(int)(sv(mx,cx,cw)*255); sc(); OverlayReloadListener.callEvent(); return true; }
+                    if (hovD(mx, my, cx, cy, cw, 22)) { cfg.hitColorActive = !cfg.hitColorActive; sc(); OverlayReloadListener.callEvent(); return true; }
+                    if (cs(mx, my, cx, cy + 42, cw, 30)) { cfg.hcRed = (int)(sv(mx, cx, cw) * 255); sc(); OverlayReloadListener.callEvent(); return true; }
+                    if (cs(mx, my, cx, cy + 70, cw, 31)) { cfg.hcGreen = (int)(sv(mx, cx, cw) * 255); sc(); OverlayReloadListener.callEvent(); return true; }
+                    if (cs(mx, my, cx, cy + 98, cw, 32)) { cfg.hcBlue = (int)(sv(mx, cx, cw) * 255); sc(); OverlayReloadListener.callEvent(); return true; }
+                    if (cs(mx, my, cx, cy + 126, cw, 33)) { cfg.hcAlpha = (int)(sv(mx, cx, cw) * 255); sc(); OverlayReloadListener.callEvent(); return true; }
                 }
                 case "Keybinds" -> {
-                    if(hovD(mx,my,cx,cy+16,cw,22)){ bind=0; return true; }
-                    if(hovD(mx,my,cx,cy+42,cw,22)){ bind=1; return true; }
-                    if(hovD(mx,my,cx,cy+68,cw,22)){ bind=2; return true; }
-                    if(hovD(mx,my,cx,cy+94,cw,22)){ bind=3; return true; }
+                    if (hovD(mx, my, cx, cy + 16, cw, 22)) { bind = 0; return true; }
+                    if (hovD(mx, my, cx, cy + 42, cw, 22)) { bind = 1; return true; }
+                    if (hovD(mx, my, cx, cy + 68, cw, 22)) { bind = 2; return true; }
+                    if (hovD(mx, my, cx, cy + 94, cw, 22)) { bind = 3; return true; }
                 }
             }
-            return super.mouseClicked(mx,my,btn);
+            return super.mouseClicked(mx, my, btn);
         }
 
-        // ── Akıcı Sürükleme ──────────────────────────────────
+        // ── Sürükleme (Slider) Desteği ────────────────────────
         @Override
         public boolean mouseDragged(double mx, double my, int btn, double dx, double dy) {
-            if(dragSlot==-1) return super.mouseDragged(mx,my,btn,dx,dy);
+            if (dragSlot == -1) return super.mouseDragged(mx, my, btn, dx, dy);
             HitXConfig cfg = AutoConfig.getConfigHolder(HitXConfig.class).getConfig();
-            float v=sv(mx,dCX,dCW);
-            switch(dragSlot){
-                case 0  ->{ cfg.xzExpand   =0.5f+v*4.5f;    sc(); }
-                case 1  ->{ cfg.yExpand     =0.5f+v*3.5f;    sc(); }
-                case 2  ->{ cfg.yOffset     =-1f +v*2f;      sc(); }
-                case 10 -> aimRange         =1f  +v*9f;
-                case 11 -> aimSpeed         =0.01f+v*0.49f;
-                case 12 -> aimFov           =v*180f;
-                case 13 -> aimRecoilStr     =v*2f;
-                case 20 -> triggerDelay     =(int)(v*500);
-                case 30 ->{ cfg.hcRed  =(int)(v*255); sc(); OverlayReloadListener.callEvent(); }
-                case 31 ->{ cfg.hcGreen=(int)(v*255); sc(); OverlayReloadListener.callEvent(); }
-                case 32 ->{ cfg.hcBlue =(int)(v*255); sc(); OverlayReloadListener.callEvent(); }
-                case 33 ->{ cfg.hcAlpha=(int)(v*255); sc(); OverlayReloadListener.callEvent(); }
+            float v = sv(mx, dCX, dCW);
+            switch (dragSlot) {
+                case 0 -> { cfg.xzExpand = 0.5f + v * 4.5f; sc(); }
+                case 1 -> { cfg.yExpand = 0.5f + v * 3.5f; sc(); }
+                case 2 -> { cfg.yOffset = -1f + v * 2f; sc(); }
+                case 10 -> aimRange = 1f + v * 9f;
+                case 11 -> aimSpeed = 0.01f + v * 0.49f;
+                case 12 -> aimFov = v * 180f;
+                case 13 -> aimRecoilStr = v * 2f;
+                case 20 -> triggerDelay = (int)(v * 500);
+                case 30 -> { cfg.hcRed = (int)(v * 255); sc(); OverlayReloadListener.callEvent(); }
+                case 31 -> { cfg.hcGreen = (int)(v * 255); sc(); OverlayReloadListener.callEvent(); }
+                case 32 -> { cfg.hcBlue = (int)(v * 255); sc(); OverlayReloadListener.callEvent(); }
+                case 33 -> { cfg.hcAlpha = (int)(v * 255); sc(); OverlayReloadListener.callEvent(); }
             }
             return true;
         }
 
         @Override
-        public boolean mouseReleased(double mx, double my, int btn) { dragSlot=-1; return super.mouseReleased(mx,my,btn); }
+        public boolean mouseReleased(double mx, double my, int btn) { 
+            dragSlot = -1; 
+            return super.mouseReleased(mx, my, btn); 
+        }
 
         @Override
         public boolean keyPressed(int k, int s, int m) {
-            if(bind==0){ keyHitbox     =k; bind=-1; return true; }
-            if(bind==1){ keyAimAssist  =k; bind=-1; return true; }
-            if(bind==2){ keyTriggerBot =k; bind=-1; return true; }
-            if(bind==3){ keyNightVision=k; bind=-1; return true; }
-            return super.keyPressed(k,s,m);
+            if (bind == 0) { keyHitbox = k; bind = -1; return true; }
+            if (bind == 1) { keyAimAssist = k; bind = -1; return true; }
+            if (bind == 2) { keyTriggerBot = k; bind = -1; return true; }
+            if (bind == 3) { keyNightVision = k; bind = -1; return true; }
+            return super.keyPressed(k, s, m);
         }
 
         @Override public boolean shouldPause() { return false; }
 
-        // ── Yardımcılar ──────────────────────────────────────
+        // ── Yardımcı Fonksiyonlar ────────────────────────────
         private boolean cs(double mx, double my, int cx, int sy, int cw, int sid) {
-            if(hovD(mx,my,cx,sy-3,cw,16)){ dragSlot=sid; dCX=cx; dCW=cw; return true; } return false;
+            if (hovD(mx, my, cx, sy - 3, cw, 16)) { 
+                dragSlot = sid; dCX = cx; dCW = cw; return true; 
+            } 
+            return false;
         }
-        private float sv(double mx, int cx, int cw) { return MathHelper.clamp((float)((mx-cx)/cw),0f,1f); }
-        private void sc(){ AutoConfig.getConfigHolder(HitXConfig.class).save(); }
-        private String kn(int k){ String n=GLFW.glfwGetKeyName(k,0); return n!=null?n.toUpperCase():"KEY_"+k; }
-        private String f1(float v){ return String.format("%.1f",v); }
-        private String f2(float v){ return String.format("%.2f",v); }
+        private float sv(double mx, int cx, int cw) { return MathHelper.clamp((float)((mx - cx) / cw), 0f, 1f); }
+        private void sc() { AutoConfig.getConfigHolder(HitXConfig.class).save(); }
+        private String kn(int k) { String n = GLFW.glfwGetKeyName(k, 0); return n != null ? n.toUpperCase() : "KEY_" + k; }
+        private String f1(float v) { return String.format("%.1f", v); }
+        private String f2(float v) { return String.format("%.2f", v); }
     }
 
-    private void iconBtn(Screen s,ItemStack i,String t,int x,int y,int w,int h,ButtonWidget.PressAction p){}
-    private boolean isArmor(ItemStack s){ return s.getItem() instanceof net.minecraft.item.ArmorItem; }
-}
+    private void iconBtn(Screen s, ItemStack i, String t, int x, int y, int w, int h, ButtonWidget.PressAction p) {}
+    private boolean isArmor(ItemStack s) { return s.getItem() instanceof net.minecraft.item.ArmorItem; }
+                }
+                         
+            
