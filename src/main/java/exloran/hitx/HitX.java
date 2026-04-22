@@ -496,37 +496,51 @@ public class HitX implements ClientModInitializer {
             return true;
         }
 
-        @Override
-        public boolean mouseReleased(double mx, double my, int btn) { 
-            dragSlot = -1; 
-            return super.mouseReleased(mx, my, btn); 
+                @Override public boolean shouldPause() { return false; }
+
+        // ── Hata Düzeltilmiş Yardımcı Metodlar ────────────────
+        
+        // hovD artık double parametre alıyor, böylece hata vermeyecek
+        private boolean hovD(double mx, double my, double x, double y, double w, double h) {
+            return mx >= x && mx <= x + w && my >= y && my <= y + h;
         }
 
-        @Override
-        public boolean keyPressed(int k, int s, int m) {
-            if (bind == 0) { keyHitbox = k; bind = -1; return true; }
-            if (bind == 1) { keyAimAssist = k; bind = -1; return true; }
-            if (bind == 2) { keyTriggerBot = k; bind = -1; return true; }
-            if (bind == 3) { keyNightVision = k; bind = -1; return true; }
-            return super.keyPressed(k, s, m);
-        }
-
-        @Override public boolean shouldPause() { return false; }
-
-        private boolean cs(double mx, double my, int cx, int sy, int cw, int sid) {
-            if (hovD(mx, my, (double)cx, (double)sy - 3, cw, 16)) { 
-                dragSlot = sid; dCX = cx; dCW = cw; return true; 
+        // cs metodu da double alacak şekilde güncellendi
+        private boolean cs(double mx, double my, double cx, double sy, double cw, int sid) {
+            // hovD'ye gönderilen parametreler artık uyumlu
+            if (hovD(mx, my, cx, (double)sy - 3, cw, 16.0)) { 
+                dragSlot = sid; 
+                dCX = (int)cx; 
+                dCW = (int)cw; 
+                return true; 
             } 
             return false;
         }
-        private float sv(double mx, int cx, int cw) { return MathHelper.clamp((float)((mx - cx) / cw), 0f, 1f); }
-        private void sc() { AutoConfig.getConfigHolder(HitXConfig.class).save(); }
-        private String kn(int k) { String n = GLFW.glfwGetKeyName(k, 0); return n != null ? n.toUpperCase() : "KEY_" + k; }
-        private String f1(float v) { return String.format("%.1f", v); }
-        private String f2(float v) { return String.format("%.2f", v); }
+
+        private float sv(double mx, int cx, int cw) { 
+            return MathHelper.clamp((float)((mx - cx) / cw), 0f, 1f); 
+        }
+
+        private void sc() { 
+            AutoConfig.getConfigHolder(HitXConfig.class).save(); 
+        }
+
+        private String kn(int k) { 
+            String n = GLFW.glfwGetKeyName(k, 0); 
+            return n != null ? n.toUpperCase() : "KEY_" + k; 
+        }
+
+        private String f1(float v) { 
+            return String.format("%.1f", v); 
+        }
+
+        private String f2(float v) { 
+            return String.format("%.2f", v); 
+        }
     }
 
     private void iconBtn(Screen s, ItemStack i, String t, int x, int y, int w, int h, ButtonWidget.PressAction p) {}
-    private boolean isArmor(ItemStack s) { return s.getItem() instanceof net.minecraft.item.ArmorItem; }
-        }
-                    
+    private boolean isArmor(ItemStack s) { 
+        return s.getItem() instanceof net.minecraft.item.ArmorItem; 
+    }
+}
